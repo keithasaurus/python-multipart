@@ -269,12 +269,6 @@ class TestParseOptionsHeader(unittest.TestCase):
             b'application/json;param="This \\" is \\" a \\" quote"')
         self.assertEqual(p[b'param'], b'This " is " a " quote')
 
-    def test_handles_ie6_bug(self):
-        t, p = parse_options_header(
-            b'text/plain; filename="C:\\this\\is\\a\\path\\file.txt"')
-
-        self.assertEqual(p[b'filename'], b'file.txt')
-
 
 class TestBaseParser(unittest.TestCase):
     def setUp(self):

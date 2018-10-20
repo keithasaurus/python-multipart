@@ -1,5 +1,4 @@
 from io import BytesIO
-# Unique missing object.
 from multipart.decoders import Base64Decoder, QuotedPrintableDecoder
 from multipart.exceptions import (
     FileError,
@@ -8,6 +7,8 @@ from multipart.exceptions import (
     QuerystringParseError
 )
 from numbers import Number
+# Unique missing object.
+from typing import Optional, Tuple, Union
 
 import logging
 import os
@@ -92,45 +93,39 @@ OPTION_RE = re.compile(OPTION_RE_STR)
 QUOTE = b'"'[0]
 
 
-def parse_options_header(value):
+def _parse_options_header_bytes(value: bytes) -> Tuple[bytes, dict]:
+    if b';' not in value:
+        return value.lower().strip(), {}
+    else:
+        # Split at the first semicolon, to get our value and then options.
+        ctype, rest = value.split(b';', 1)
+        options = {}
+
+        # Parse the options.
+        for match in OPTION_RE.finditer(rest):
+            key = match.group(1).lower()
+            value = match.group(2)
+            if value[0] == QUOTE and value[-1] == QUOTE:
+                # Unquote the value.
+                value = value[1:-1]
+                value = value.replace(b'\\\\', b'\\').replace(b'\\"', b'"')
+
+            options[key] = value
+
+        return ctype, options
+
+
+def parse_options_header(value: Union[str, bytes]):
     """
     Parses a Content-Type header into a value in the following format:
         (content_type, {parameters})
     """
     if not value:
-        return (b'', {})
+        return b'', {}
 
-    # If we are passed a string, we assume that it conforms to WSGI and does
-    # not contain any code point that's not in latin-1.
-    if isinstance(value, str):            # pragma: no cover
-        value = value.encode('latin-1')
-
-    # If we have no options, return the string as-is.
-    if b';' not in value:
-        return value.lower().strip(), {}
-
-    # Split at the first semicolon, to get our value and then options.
-    ctype, rest = value.split(b';', 1)
-    options = {}
-
-    # Parse the options.
-    for match in OPTION_RE.finditer(rest):
-        key = match.group(1).lower()
-        value = match.group(2)
-        if value[0] == QUOTE and value[-1] == QUOTE:
-            # Unquote the value.
-            value = value[1:-1]
-            value = value.replace(b'\\\\', b'\\').replace(b'\\"', b'"')
-
-        # If the value is a filename, we need to fix a bug on IE6 that sends
-        # the full file path instead of the filename.
-        if key == b'filename':
-            if value[1:3] == b':\\' or value[:2] == b'\\\\':
-                value = value.split(b'\\')[-1]
-
-        options[key] = value
-
-    return ctype, options
+    return _parse_options_header_bytes(
+        value.encode('utf8') if isinstance(value, str) else value
+    )
 
 
 class Field(object):
@@ -156,7 +151,7 @@ class Field(object):
         self._cache = _missing
 
     @classmethod
-    def from_value(klass, name, value):
+    def from_value(cls, name, value: Optional[bytes]):
         """Create an instance of a :class:`Field`, and set the corresponding
         value - either None or an actual value.  This method will also
         finalize the Field itself.
@@ -165,8 +160,7 @@ class Field(object):
         :param value: the value of the form field - either a bytestring or
                       None
         """
-
-        f = klass(name)
+        f = cls(name)
         if value is None:
             f.set_none()
         else:
@@ -174,14 +168,14 @@ class Field(object):
         f.finalize()
         return f
 
-    def write(self, data):
+    def write(self, data: bytes) -> int:
         """Write some data into the form field.
 
         :param data: a bytestring
         """
         return self.on_data(data)
 
-    def on_data(self, data):
+    def on_data(self, data) -> int:
         """This method is a callback that will be called whenever data is
         written to the Field.
 
@@ -191,18 +185,18 @@ class Field(object):
         self._cache = _missing
         return len(data)
 
-    def on_end(self):
+    def on_end(self) -> None:
         """This method is called whenever the Field is finalized.
         """
         if self._cache is _missing:
             self._cache = b''.join(self._value)
 
-    def finalize(self):
+    def finalize(self) -> None:
         """Finalize the form field.
         """
         self.on_end()
 
-    def close(self):
+    def close(self) -> None:
         """Close the Field object.  This will free any underlying cache.
         """
         # Free our value array.
