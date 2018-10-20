@@ -10,7 +10,6 @@ from multipart.exceptions import (
     QuerystringParseError
 )
 from multipart.multipart import (
-    BaseParser,
     create_form_parser,
     Field,
     File,
@@ -268,27 +267,6 @@ class TestParseOptionsHeader(unittest.TestCase):
         t, p = parse_options_header(
             b'application/json;param="This \\" is \\" a \\" quote"')
         self.assertEqual(p[b'param'], b'This " is " a " quote')
-
-
-class TestBaseParser(unittest.TestCase):
-    def setUp(self):
-        self.b = BaseParser()
-        self.b.callbacks = {}
-
-    def test_callbacks(self):
-        # The stupid list-ness is to get around lack of nonlocal on py2
-        list_ = [0]
-
-        def on_foo():
-            list_[0] += 1
-
-        self.b.set_callback('foo', on_foo)
-        self.b.callback('foo')
-        self.assertEqual(list_[0], 1)
-
-        self.b.set_callback('foo', None)
-        self.b.callback('foo')
-        self.assertEqual(list_[0], 1)
 
 
 class TestQuerystringParser(unittest.TestCase):

@@ -7,8 +7,7 @@ from multipart.exceptions import (
     QuerystringParseError
 )
 from numbers import Number
-# Unique missing object.
-from typing import Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import logging
 import os
@@ -93,7 +92,7 @@ OPTION_RE = re.compile(OPTION_RE_STR)
 QUOTE = b'"'[0]
 
 
-def _parse_options_header_bytes(value: bytes) -> Tuple[bytes, dict]:
+def _parse_options_header_bytes(value: bytes) -> Tuple[bytes, Dict]:
     if b';' not in value:
         return value.lower().strip(), {}
     else:
@@ -205,7 +204,7 @@ class Field(object):
 
         del self._value
 
-    def set_none(self):
+    def set_none(self) -> None:
         """Some fields in a querystring can possibly have a value of None - for
         example, the string "foo&bar=&baz=asdf" will have a field with the
         name "foo" and value None, one with name "bar" and value "", and one
@@ -220,14 +219,14 @@ class Field(object):
         return self._name
 
     @property
-    def value(self):
+    def value(self) -> bytes:
         """This property returns the value of the form field."""
         if self._cache is _missing:
             self._cache = b''.join(self._value)
 
         return self._cache
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         if isinstance(other, Field):
             return (
                 self.field_name == other.field_name and
@@ -236,7 +235,7 @@ class Field(object):
         else:
             return NotImplemented
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if len(self.value) > 97:
             # We get the repr, and then insert three dots before the final
             # quote.
@@ -253,6 +252,16 @@ class Field(object):
 
 def empty_dict_if_none(dict_or_none):
     return {} if dict_or_none is None else dict_or_none
+
+
+FILE_SYSTEM_ENCODING = sys.getfilesystemencoding()
+
+
+def str_or_decode_bytes_system(str_or_bytes: Union[str, bytes]) -> str:
+    if isinstance(str_or_bytes, bytes):
+        return str_or_bytes.decode(FILE_SYSTEM_ENCODING)
+    else:
+        return str_or_bytes
 
 
 class File(object):
@@ -328,13 +337,13 @@ class File(object):
 
         # Our actual file name is None by default, since, depending on our
         # config, we may not actually use the provided name.
-        self._actual_file_name = None
+        self._actual_file_name: Optional[bytes] = None
 
         # Split the extension from the filename.
         if file_name is not None:
             base, ext = os.path.splitext(file_name)
             self._file_base = base
-            self._ext = ext
+            self._ext: Union[str, bytes] = ext
 
     @property
     def field_name(self):
@@ -430,9 +439,9 @@ class File(object):
 
             # Build our filename.
             # TODO: what happens if we don't have a filename?
-            fname = self._file_base
-            if keep_extensions:
-                fname = fname + self._ext
+            fname = (self._file_base + self._ext
+                     if keep_extensions
+                     else self._file_base)
 
             path = os.path.join(file_dir, fname)
             try:
@@ -443,50 +452,22 @@ class File(object):
                 self.logger.exception("Error opening temporary file")
                 raise FileError("Error opening temporary file: %r" % path)
         else:
-            # Build options array.
-            # Note that on Python 3, tempfile doesn't support byte names.  We
-            # encode our paths using the default filesystem encoding.
-            options = {}
-            if keep_extensions:
-                ext = self._ext
-                if isinstance(ext, bytes):
-                    ext = ext.decode(sys.getfilesystemencoding())
-
-                options['suffix'] = ext
-            if file_dir is not None:
-                d = file_dir
-                if isinstance(d, bytes):
-                    d = d.decode(sys.getfilesystemencoding())
-
-                options['dir'] = d
-            options['delete'] = delete_tmp
-
-            # Create a temporary (named) file with the appropriate settings.
-            self.logger.info("Creating a temporary file with options: %r",
-                             options)
-            try:
-                tmp_file = tempfile.NamedTemporaryFile(**options)
-            except (IOError, OSError):
-                self.logger.exception("Error creating named temporary file")
-                raise FileError("Error creating named temporary file")
-
-            fname = tmp_file.name
-
-            # Encode filename as bytes.
-            if isinstance(fname, str):
-                fname = fname.encode(sys.getfilesystemencoding())
+            tmp_file, fname = get_temp_file_details(file_dir,
+                                                    delete_tmp,
+                                                    keep_extensions,
+                                                    self)
 
         self._actual_file_name = fname
         return tmp_file
 
-    def write(self, data):
+    def write(self, data: bytes) -> int:
         """Write some data to the File.
 
         :param data: a bytestring
         """
         return self.on_data(data)
 
-    def on_data(self, data):
+    def on_data(self, data) -> int:
         """This method is a callback that will be called whenever data is
         written to the File.
 
@@ -518,31 +499,62 @@ class File(object):
         # Return the number of bytes written.
         return bwritten
 
-    def on_end(self):
+    def on_end(self) -> None:
         """This method is called whenever the Field is finalized.
         """
         # Flush the underlying file object
         self._fileobj.flush()
 
-    def finalize(self):
+    def finalize(self) -> None:
         """Finalize the form file.  This will not close the underlying file,
         but simply signal that we are finished writing to the File.
         """
         self.on_end()
 
-    def close(self):
+    def close(self) -> None:
         """Close the File object.  This will actually close the underlying
         file object (whether it's a :class:`io.BytesIO` or an actual file
         object).
         """
         self._fileobj.close()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "%s(file_name=%r, field_name=%r)" % (
             self.__class__.__name__,
             self.file_name,
             self.field_name
         )
+
+
+def get_temp_file_details(
+        file_dir: Union[None, str, bytes],
+        delete_tmp: bool,
+        keep_extensions: bool,
+        f: File
+) -> Tuple[Any, bytes]:  # Any should be _TemporaryFileWrapper, but it's private
+    options: Dict[str, Any] = {
+        'delete': delete_tmp
+    }
+    if keep_extensions:
+        options['suffix'] = str_or_decode_bytes_system(f._ext)
+
+    if file_dir is not None:
+        options['dir'] = str_or_decode_bytes_system(file_dir)
+
+    # Create a temporary (named) file with the appropriate settings.
+    f.logger.info("Creating a temporary file with options: %r", options)
+
+    try:
+        tmp_file = tempfile.NamedTemporaryFile(**options)
+    except (IOError, OSError):
+        f.logger.exception("Error creating named temporary file")
+        raise FileError("Error creating named temporary file")
+    else:
+        fname: Union[str, bytes] = tmp_file.name
+
+        return tmp_file, (fname.encode(sys.getfilesystemencoding())
+                          if isinstance(fname, str)
+                          else fname)
 
 
 class BaseParser(object):
@@ -565,54 +577,30 @@ class BaseParser(object):
     The callback is not passed a copy of the data, since copying severely hurts
     performance.
     """
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
+    def __init__(self) -> None:
+        self.logger: logging.Logger = logging.getLogger(__name__)
+        self.callbacks: Dict[str, Callable] = {}
 
-    def callback(self, name, data=None, start=None, end=None):
-        """This function calls a provided callback with some data.  If the
-        callback is not set, will do nothing.
+    def callback(self,
+                 name: str,
+                 # todo: data is Optional[bytes]?
+                 data: Optional[Any]=None,
+                 start: Optional[int]=None,
+                 end: Optional[int]=None) -> None:
+        func = self.callbacks.get("on_" + name)
 
-        :param name: The name of the callback to call (as a string).
-
-        :param data: Data to pass to the callback.  If None, then it is
-                     assumed that the callback is a notification callback,
-                     and no parameters are given.
-
-        :param end: An integer that is passed to the data callback.
-
-        :param start: An integer that is passed to the data callback.
-        """
-        name = "on_" + name
-        func = self.callbacks.get(name)
         if func is None:
-            return
-
-        # Depending on whether we're given a buffer...
-        if data is not None:
+            return None
+        elif data is not None:
             # Don't do anything if we have start == end.
             if start is not None and start == end:
-                return
+                return None
 
             self.logger.debug("Calling %s with data[%d:%d]", name, start, end)
             func(data, start, end)
         else:
             self.logger.debug("Calling %s with no data", name)
             func()
-
-    def set_callback(self, name, new_func):
-        """Update the function for a callback.  Removes from the callbacks dict
-        if new_func is None.
-
-        :param name: The name of the callback to call (as a string).
-
-        :param new_func: The new function for the callback.  If None, then the
-                         callback will be removed (with no error if it does not
-                         exist).
-        """
-        if new_func is None:
-            self.callbacks.pop('on_' + name, None)
-        else:
-            self.callbacks['on_' + name] = new_func
 
     def close(self):
         pass                # pragma: no cover
