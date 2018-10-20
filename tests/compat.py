@@ -1,13 +1,8 @@
-try:
-    import unittest2 as unittest
-except ImportError:
-    import unittest
-
+import functools
 import os
 import re
 import sys
 import types
-import functools
 
 
 def ensure_in_path(path):
@@ -49,7 +44,8 @@ if pytest is not None:
     xfail = pytest.mark.xfail
 
 else:
-    slow_test = lambda x: x
+    def slow_test(x):
+        return x
 
     def xfail(*args, **kwargs):
         if len(args) > 0 and isinstance(args[0], types.FunctionType):

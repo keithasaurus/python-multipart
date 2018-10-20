@@ -1,59 +1,53 @@
-from __future__ import with_statement, absolute_import, print_function
-
-from six import (
-    binary_type,
-    text_type,
-)
-
-from .decoders import *
-from .exceptions import *
-
-try:
-    from urlparse import parse_qs
-except ImportError:
-    from urllib.parse import parse_qs
-
-import os
-import re
-import sys
-import shutil
-import logging
-import tempfile
 from io import BytesIO
+# Unique missing object.
+from multipart.decoders import Base64Decoder, QuotedPrintableDecoder
+from multipart.exceptions import (
+    FileError,
+    FormParserError,
+    MultipartParseError,
+    QuerystringParseError
+)
 from numbers import Number
 
-# Unique missing object.
+import logging
+import os
+import re
+import shutil
+import sys
+import tempfile
+
 _missing = object()
 
 # States for the querystring parser.
 STATE_BEFORE_FIELD = 0
-STATE_FIELD_NAME   = 1
-STATE_FIELD_DATA   = 2
+STATE_FIELD_NAME = 1
+STATE_FIELD_DATA = 2
 
 # States for the multipart parser
-STATE_START                     = 0
-STATE_START_BOUNDARY            = 1
-STATE_HEADER_FIELD_START        = 2
-STATE_HEADER_FIELD              = 3
-STATE_HEADER_VALUE_START        = 4
-STATE_HEADER_VALUE              = 5
-STATE_HEADER_VALUE_ALMOST_DONE  = 6
-STATE_HEADERS_ALMOST_DONE       = 7
-STATE_PART_DATA_START           = 8
-STATE_PART_DATA                 = 9
-STATE_PART_DATA_END             = 10
-STATE_END                       = 11
+STATE_START = 0
+STATE_START_BOUNDARY = 1
+STATE_HEADER_FIELD_START = 2
+STATE_HEADER_FIELD = 3
+STATE_HEADER_VALUE_START = 4
+STATE_HEADER_VALUE = 5
+STATE_HEADER_VALUE_ALMOST_DONE = 6
+STATE_HEADERS_ALMOST_DONE = 7
+STATE_PART_DATA_START = 8
+STATE_PART_DATA = 9
+STATE_PART_DATA_END = 10
+STATE_END = 11
 
 STATES = [
     "START",
-    "START_BOUNDARY", "HEADER_FEILD_START", "HEADER_FIELD", "HEADER_VALUE_START", "HEADER_VALUE",
-    "HEADER_VALUE_ALMOST_DONE", "HEADRES_ALMOST_DONE", "PART_DATA_START", "PART_DATA", "PART_DATA_END", "END"
+    "START_BOUNDARY", "HEADER_FEILD_START", "HEADER_FIELD", "HEADER_VALUE_START",
+    "HEADER_VALUE",
+    "HEADER_VALUE_ALMOST_DONE", "HEADRES_ALMOST_DONE", "PART_DATA_START",
+    "PART_DATA", "PART_DATA_END", "END"
 ]
 
-
 # Flags for the multipart parser.
-FLAG_PART_BOUNDARY              = 1
-FLAG_LAST_BOUNDARY              = 2
+FLAG_PART_BOUNDARY = 1
+FLAG_LAST_BOUNDARY = 2
 
 # Get constants.  Since iterating over a str on Python 2 gives you a 1-length
 # string, but iterating over a bytes object on Python 3 gives you an integer,
@@ -73,14 +67,19 @@ NULL = b'\x00'[0]
 # str on Py2, and bytes on Py3.  Same with getting the ordinal value of a byte,
 # and joining a list of bytes together.
 # These functions abstract that.
-if PY3:                         # pragma: no cover
-    lower_char = lambda c: c | 0x20
-    ord_char = lambda c: c
-    join_bytes = lambda b: bytes(list(b))
-else:                           # pragma: no cover
-    lower_char = lambda c: c.lower()
-    ord_char = lambda c: ord(c)
-    join_bytes = lambda b: b''.join(list(b))
+
+
+def lower_char(c):
+    return c | 0x20
+
+
+def ord_char(c):
+    return c
+
+
+def join_bytes(b):
+    return bytes(list(b))
+
 
 # These are regexes for parsing header values.
 SPECIAL_CHARS = re.escape(b'()<>@,;:\\"/[]?={} \t')
@@ -103,12 +102,12 @@ def parse_options_header(value):
 
     # If we are passed a string, we assume that it conforms to WSGI and does
     # not contain any code point that's not in latin-1.
-    if isinstance(value, text_type):            # pragma: no cover
+    if isinstance(value, str):            # pragma: no cover
         value = value.encode('latin-1')
 
     # If we have no options, return the string as-is.
     if b';' not in value:
-        return (value.lower().strip(), {})
+        return value.lower().strip(), {}
 
     # Split at the first semicolon, to get our value and then options.
     ctype, rest = value.split(b';', 1)
@@ -456,13 +455,13 @@ class File(object):
             options = {}
             if keep_extensions:
                 ext = self._ext
-                if isinstance(ext, binary_type):
+                if isinstance(ext, bytes):
                     ext = ext.decode(sys.getfilesystemencoding())
 
                 options['suffix'] = ext
             if file_dir is not None:
                 d = file_dir
-                if isinstance(d, binary_type):
+                if isinstance(d, bytes):
                     d = d.decode(sys.getfilesystemencoding())
 
                 options['dir'] = d
@@ -480,7 +479,7 @@ class File(object):
             fname = tmp_file.name
 
             # Encode filename as bytes.
-            if isinstance(fname, text_type):
+            if isinstance(fname, str):
                 fname = fname.encode(sys.getfilesystemencoding())
 
         self._actual_file_name = fname
@@ -789,13 +788,13 @@ class QuerystringParser(BaseParser):
                                 new_size)
             data_len = new_size
 
-        l = 0
+        length: int = 0
         try:
-            l = self._internal_write(data, data_len)
+            length = self._internal_write(data, data_len)
         finally:
-            self._current_size += l
+            self._current_size += length
 
-        return l
+        return length
 
     def _internal_write(self, data, length):
         state = self.state
@@ -826,7 +825,7 @@ class QuerystringParser(BaseParser):
                             raise e
                         else:
                             self.logger.debug("Skipping duplicate ampersand/"
-                                         "semicolon at %d", i)
+                                              "semicolon at %d", i)
                     else:
                         # This case is when we're skipping the (first)
                         # seperator between fields, so we just set our flag
@@ -888,7 +887,7 @@ class QuerystringParser(BaseParser):
                         # We're parsing strictly.  If we find a seperator,
                         # this is an error - we require an equals sign.
                         if sep_pos != -1:
-                            e =  QuerystringParseError(
+                            e = QuerystringParseError(
                                 "When strict_parsing is True, we require an "
                                 "equals sign in all field chunks. Did not "
                                 "find one in the chunk that starts at %d" %
@@ -1039,7 +1038,7 @@ class MultipartParser(BaseParser):
         # self.skip = tuple(skip)
 
         # Save our boundary.
-        if isinstance(boundary, text_type):         # pragma: no cover
+        if isinstance(boundary, str):         # pragma: no cover
             boundary = boundary.encode('latin-1')
         self.boundary = b'\r\n--' + boundary
 
@@ -1073,13 +1072,13 @@ class MultipartParser(BaseParser):
                                 new_size)
             data_len = new_size
 
-        l = 0
+        length: int = 0
         try:
-            l = self._internal_write(data, data_len)
+            length = self._internal_write(data, data_len)
         finally:
-            self._current_size += l
+            self._current_size += length
 
-        return l
+        return length
 
     def _internal_write(self, data, length):
         # Get values from locals.
@@ -1439,7 +1438,8 @@ class MultipartParser(BaseParser):
             elif state == STATE_END:
                 # Do nothing and just consume a byte in the end state.
                 if c not in (CR, LF):
-                    self.logger.warning("Consuming a byte '0x%x' in the end state", c)
+                    self.logger.warning("Consuming a byte '0x%x' in the end state",
+                                        c)
 
             else:                   # pragma: no cover (error case)
                 # We got into a strange state somehow!  Just stop processing.

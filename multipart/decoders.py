@@ -1,7 +1,7 @@
+from .exceptions import Base64Error, DecodeError
+
 import base64
 import binascii
-
-from .exceptions import Base64Error, DecodeError
 
 
 class Base64Decoder(object):

@@ -1,6 +1,5 @@
-import binascii
 
-from six import PY3
+import binascii
 
 
 class FormParserError(ValueError):
@@ -39,20 +38,11 @@ class DecodeError(ParseError):
     pass
 
 
-# On Python 3.3, IOError is the same as OSError, so we don't want to inherit
-# from both of them.  We handle this case below.
-if IOError is not OSError:      # pragma: no cover
-    class FileError(FormParserError, IOError, OSError):
-        """Exception class for problems with the File class."""
-        pass
-else:                           # pragma: no cover
-    class FileError(FormParserError, OSError):
-        """Exception class for problems with the File class."""
-        pass
+class FileError(FormParserError, OSError):
+    """Exception class for problems with the File class."""
+    pass
+
 
 # We check which version of Python we're on to figure out what error we need
 # to catch for invalid Base64.
-if PY3:                         # pragma: no cover
-    Base64Error = binascii.Error
-else:                           # pragma: no cover
-    Base64Error = TypeError
+Base64Error = binascii.Error

@@ -1,7 +1,8 @@
 #!/usr/bin/env python
+from setuptools import setup
+
 import os
 import re
-from setuptools import setup
 
 version_file = os.path.join('multipart', '_version.py')
 with open(version_file, 'rb') as f:
@@ -25,9 +26,6 @@ setup(name='python-multipart',
       license='Apache',
       platforms='any',
       zip_safe=False,
-      install_requires=[
-          'six>=1.4.0',
-      ],
       tests_require=tests_require,
       packages=[
           'multipart',
@@ -46,4 +44,3 @@ setup(name='python-multipart',
         'Topic :: Software Development :: Libraries :: Python Modules'
       ],
       test_suite='multipart.tests.suite',)
-
