@@ -12,12 +12,6 @@ with open(version_file, 'rb') as f:
 version_re = re.compile(r'((?:\d+)\.(?:\d+)\.(?:\d+))')
 version = version_re.search(version_data).group(0)
 
-tests_require = [
-    'pytest',
-    'pytest-cov',
-    'PyYAML'
-]
-
 setup(name='python-multipart',
       version=version,
       description='A streaming multipart parser for Python',
@@ -26,7 +20,6 @@ setup(name='python-multipart',
       license='Apache',
       platforms='any',
       zip_safe=False,
-      tests_require=tests_require,
       packages=[
           'multipart',
       ],
