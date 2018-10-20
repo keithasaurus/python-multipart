@@ -6,7 +6,7 @@ branch = False
 # branch = True
 omit =
     *six.py
-    multipart/tests/*
+    tests/*
 
 [report]
 # Regexes for lines to exclude from consideration

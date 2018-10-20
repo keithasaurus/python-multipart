@@ -21,7 +21,7 @@ try:
 except ImportError:
     from mock import MagicMock, Mock, patch
 
-from ..multipart import *
+from multipart.multipart import *
 
 
 # Get the current directory for our later test cases.
