@@ -49,6 +49,8 @@ STATES = [
 FLAG_PART_BOUNDARY = 1
 FLAG_LAST_BOUNDARY = 2
 
+MAX_INT = 2 ** 10000
+
 # Get constants.  Since iterating over a str on Python 2 gives you a 1-length
 # string, but iterating over a bytes object on Python 3 gives you an integer,
 # we need to save these constants.
@@ -996,7 +998,7 @@ class MultipartParser(BaseParser):
     def __init__(self,
                  boundary: Union[str, bytes],
                  callbacks: Dict[str, Callable]=None,
-                 max_size: int=2**10000) -> None:
+                 max_size: int=MAX_INT) -> None:
         super().__init__()
         self.state = STATE_START
         self.index = self.flags = 0
@@ -1526,7 +1528,7 @@ class FormParser(object):
     #: This is the default configuration for our form parser.
     #: Note: all file sizes should be in bytes.
     DEFAULT_CONFIG = {
-        'MAX_BODY_SIZE': float('inf'),
+        'MAX_BODY_SIZE': MAX_INT,
         'MAX_MEMORY_FILE_SIZE': 1 * 1024 * 1024,
         'UPLOAD_DIR': None,
         'UPLOAD_KEEP_FILENAME': False,
