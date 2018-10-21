@@ -7,7 +7,7 @@ from multipart.exceptions import (
     QuerystringParseError
 )
 from numbers import Number
-from typing import Any, Callable, Dict, Optional, Tuple, Union, Set, List
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import logging
 import os
@@ -1499,19 +1499,19 @@ class FormParser(object):
                       about the uploaded file.  In such cases, you can provide
                       the file name of the uploaded file manually.
 
-    :param FileClass: The class to use for uploaded files.  Defaults to
+    :param file_class: The class to use for uploaded files.  Defaults to
                       :class:`File`, but you can provide your own class if you
                       wish to customize behaviour.  The class will be
-                      instantiated as FileClass(file_name, field_name), and it
-                      must provide the folllowing functions::
+                      instantiated as file_class(file_name, field_name), and it
+                      must provide the following functions::
                           file_instance.write(data)
                           file_instance.finalize()
                           file_instance.close()
 
-    :param FieldClass: The class to use for uploaded fields.  Defaults to
+    :param field_class: The class to use for uploaded fields.  Defaults to
                        :class:`Field`, but you can provide your own class if
                        you wish to customize behaviour.  The class will be
-                       instantiated as FieldClass(field_name), and it must
+                       instantiated as field_class(field_name), and it must
                        provide the folllowing functions::
                            field_instance.write(data)
                            field_instance.finalize()
@@ -1537,8 +1537,8 @@ class FormParser(object):
     }
 
     def __init__(self, content_type, on_field, on_file, on_end=None,
-                 boundary=None, file_name=None, FileClass=File,
-                 FieldClass=Field, config=None):
+                 boundary=None, file_name=None, file_class=File,
+                 field_class=Field, config=None):
 
         self.logger = logging.getLogger(__name__)
 
@@ -1554,8 +1554,8 @@ class FormParser(object):
         self.on_end = on_end
 
         # Save classes.
-        self.FileClass = File
-        self.FieldClass = Field
+        self.file_class = File
+        self.field_class = Field
 
         # Set configuration options.
         self.config = self.DEFAULT_CONFIG.copy()
@@ -1568,7 +1568,7 @@ class FormParser(object):
                 f = None
 
             def on_start():
-                vars.f = FileClass(file_name, None, config=self.config)
+                vars.f = file_class(file_name, None, config=self.config)
 
             def on_data(data, start, end):
                 vars.f.write(data[start:end])
@@ -1610,7 +1610,7 @@ class FormParser(object):
 
             def on_field_data(data, start, end):
                 if vars.f is None:
-                    vars.f = FieldClass(b''.join(name_buffer))
+                    vars.f = field_class(b''.join(name_buffer))
                     del name_buffer[:]
                 vars.f.write(data[start:end])
 
@@ -1619,7 +1619,7 @@ class FormParser(object):
                 if vars.f is None:
                     # If we get here, it's because there was no field data.
                     # We create a field, set it to None, and then continue.
-                    vars.f = FieldClass(b''.join(name_buffer))
+                    vars.f = field_class(b''.join(name_buffer))
                     del name_buffer[:]
                     vars.f.set_none()
 
@@ -1703,9 +1703,9 @@ class FormParser(object):
 
                 # Create the proper class.
                 if file_name is None:
-                    vars.f = FieldClass(field_name)
+                    vars.f = field_class(field_name)
                 else:
-                    vars.f = FileClass(file_name, field_name, config=self.config)
+                    vars.f = file_class(file_name, field_name, config=self.config)
                     vars.is_file = True
 
                 # Parse the given Content-Transfer-Encoding to determine what
