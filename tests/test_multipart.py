@@ -1279,7 +1279,6 @@ def suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(TestFile))
     suite.addTest(unittest.makeSuite(TestParseOptionsHeader))
-    suite.addTest(unittest.makeSuite(TestBaseParser))
     suite.addTest(unittest.makeSuite(TestQuerystringParser))
     suite.addTest(unittest.makeSuite(TestOctetStreamParser))
     suite.addTest(unittest.makeSuite(TestBase64Decoder))

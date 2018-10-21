@@ -7,7 +7,7 @@ from multipart.exceptions import (
     QuerystringParseError
 )
 from numbers import Number
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union, Set, List
 
 import logging
 import os
@@ -993,9 +993,11 @@ class MultipartParser(BaseParser):
                      i.e. unbounded.
     """
 
-    def __init__(self, boundary, callbacks=None, max_size=float('inf')):
-        # Initialize parser state.
-        super(MultipartParser, self).__init__()
+    def __init__(self,
+                 boundary: Union[str, bytes],
+                 callbacks: Dict[str, Callable]=None,
+                 max_size: int=2**10000) -> None:
+        super().__init__()
         self.state = STATE_START
         self.index = self.flags = 0
 
@@ -1004,8 +1006,8 @@ class MultipartParser(BaseParser):
         if not isinstance(max_size, Number) or max_size < 1:
             raise ValueError("max_size must be a positive number, not %r" %
                              max_size)
-        self.max_size = max_size
-        self._current_size = 0
+        self.max_size: int = max_size
+        self._current_size: int = 0
 
         # Setup marks.  These are used to track the state of data recieved.
         self.marks = {}
@@ -1019,21 +1021,20 @@ class MultipartParser(BaseParser):
         # # We use a tuple since it's a constant, and marginally faster.
         # self.skip = tuple(skip)
 
-        # Save our boundary.
-        if isinstance(boundary, str):         # pragma: no cover
-            boundary = boundary.encode('latin-1')
-        self.boundary = b'\r\n--' + boundary
+        self.boundary: bytes = b'\r\n--' + (
+            boundary.encode('latin-1') if isinstance(boundary, str) else boundary
+        )
 
         # Get a set of characters that belong to our boundary.
-        self.boundary_chars = frozenset(self.boundary)
+        self.boundary_chars: Set[int] = frozenset(self.boundary)
 
         # We also create a lookbehind list.
         # Note: the +8 is since we can have, at maximum, "\r\n--" + boundary +
         # "--\r\n" at the final boundary, and the length of '\r\n--' and
         # '--\r\n' is 8 bytes.
-        self.lookbehind = [NULL for x in range(len(boundary) + 8)]
+        self.lookbehind: List[int] = [NULL for _ in range(len(self.boundary) + 8)]
 
-    def write(self, data):
+    def write(self, data: bytes) -> int:
         """Write some data to the parser, which will perform size verification,
         and then parse the data into the appropriate location (e.g. header,
         data, etc.), and pass this on to the underlying callback.  If an error
@@ -1062,7 +1063,7 @@ class MultipartParser(BaseParser):
 
         return length
 
-    def _internal_write(self, data, length):
+    def _internal_write(self, data, length) -> int:
         # Get values from locals.
         boundary = self.boundary
 
