@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from io import BytesIO
 from multipart.decoders import Base64Decoder, QuotedPrintableDecoder
 from multipart.exceptions import (
@@ -7,6 +8,7 @@ from multipart.exceptions import (
     QuerystringParseError
 )
 from numbers import Number
+from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import logging
@@ -153,13 +155,10 @@ class Field(object):
 
     @classmethod
     def from_value(cls, name, value: Optional[bytes]):
-        """Create an instance of a :class:`Field`, and set the corresponding
+        """
+        Create an instance of a :class:`Field`, and set the corresponding
         value - either None or an actual value.  This method will also
         finalize the Field itself.
-
-        :param name: the name of the form field
-        :param value: the value of the form field - either a bytestring or
-                      None
         """
         f = cls(name)
         if value is None:
@@ -641,7 +640,9 @@ class OctetStreamParser(BaseParser):
     :param max_size: The maximum size of body to parse.  Defaults to infinity -
                      i.e. unbounded.
     """
-    def __init__(self, callbacks=None, max_size=float('inf')):
+    def __init__(self,
+                 callbacks: Dict[str, Callable]=None,
+                 max_size: int=MAX_INT) -> None:
         super(OctetStreamParser, self).__init__()
         self.callbacks = empty_dict_if_none(callbacks)
         self._started = False
@@ -649,14 +650,12 @@ class OctetStreamParser(BaseParser):
         if not isinstance(max_size, Number) or max_size < 1:
             raise ValueError("max_size must be a positive number, not %r" %
                              max_size)
-        self.max_size = max_size
-        self._current_size = 0
+        self.max_size: int = max_size
+        self._current_size: int = 0
 
-    def write(self, data):
+    def write(self, data: bytes) -> int:
         """Write some data to the parser, which will perform size verification,
         and then pass the data to the underlying callback.
-
-        :param data: a bytestring
         """
         if not self._started:
             self.callback('start')
@@ -678,14 +677,14 @@ class OctetStreamParser(BaseParser):
         self.callback('data', data, 0, data_len)
         return data_len
 
-    def finalize(self):
+    def finalize(self) -> None:
         """Finalize this parser, which signals to that we are finished parsing,
         and sends the on_end callback.
         """
         self.callback('end')
 
-    def __repr__(self):
-        return "%s()" % self.__class__.__name__
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}()"
 
 
 class QuerystringParser(BaseParser):
@@ -733,9 +732,11 @@ class QuerystringParser(BaseParser):
     :param max_size: The maximum size of body to parse.  Defaults to infinity -
                      i.e. unbounded.
     """
-    def __init__(self, callbacks=None, strict_parsing=False,
-                 max_size=float('inf')):
-        super(QuerystringParser, self).__init__()
+    def __init__(self,
+                 callbacks: Dict[str, Callable]=None,
+                 strict_parsing: bool=False,
+                 max_size: int=MAX_INT) -> None:
+        super().__init__()
         self.state = STATE_BEFORE_FIELD
         self._found_sep = False
 
@@ -745,21 +746,19 @@ class QuerystringParser(BaseParser):
         if not isinstance(max_size, Number) or max_size < 1:
             raise ValueError("max_size must be a positive number, not %r" %
                              max_size)
-        self.max_size = max_size
-        self._current_size = 0
+        self.max_size: int = max_size
+        self._current_size: int = 0
 
         # Should parsing be strict?
-        self.strict_parsing = strict_parsing
+        self.strict_parsing: bool = strict_parsing
 
-    def write(self, data):
+    def write(self, data: bytes) -> int:
         """Write some data to the parser, which will perform size verification,
         parse into either a field name or value, and then pass the
         corresponding data to the underlying callback.  If an error is
         encountered while parsing, a QuerystringParseError will be raised.  The
         "offset" attribute of the raised exception will be set to the offset in
         the input data chunk (NOT the overall stream) that caused the error.
-
-        :param data: a bytestring
         """
         # Handle sizing.
         data_len = len(data)
@@ -780,7 +779,7 @@ class QuerystringParser(BaseParser):
 
         return length
 
-    def _internal_write(self, data, length):
+    def _internal_write(self, data, length) -> int:
         state = self.state
         strict_parsing = self.strict_parsing
         found_sep = self._found_sep
@@ -923,7 +922,7 @@ class QuerystringParser(BaseParser):
         self._found_sep = found_sep
         return len(data)
 
-    def finalize(self):
+    def finalize(self) -> None:
         """Finalize this parser, which signals to that we are finished parsing,
         if we're still in the middle of a field, an on_field_end callback, and
         then the on_end callback.
@@ -933,11 +932,11 @@ class QuerystringParser(BaseParser):
             self.callback('field_end')
         self.callback('end')
 
-    def __repr__(self):
-        return "%s(keep_blank_values=%r, strict_parsing=%r, max_size=%r)" % (
+    def __repr__(self) -> str:
+        return "%s(strict_parsing=%r, max_size=%r)" % (
             self.__class__.__name__,
-            self.keep_blank_values, self.strict_parsing, self.max_size
-        )
+            self.strict_parsing,
+            self.max_size)
 
 
 class MultipartParser(BaseParser):
@@ -1458,7 +1457,7 @@ class MultipartParser(BaseParser):
         # all of it.
         return length
 
-    def finalize(self):
+    def finalize(self) -> None:
         """Finalize this parser, which signals to that we are finished parsing.
 
         Note: It does not currently, but in the future, it will verify that we
@@ -1469,7 +1468,7 @@ class MultipartParser(BaseParser):
         # error or otherwise state that we're not finished parsing.
         pass
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "%s(boundary=%r)" % (self.__class__.__name__, self.boundary)
 
 
@@ -1514,7 +1513,7 @@ class FormParser(object):
                        :class:`Field`, but you can provide your own class if
                        you wish to customize behaviour.  The class will be
                        instantiated as field_class(field_name), and it must
-                       provide the folllowing functions::
+                       provide the following functions::
                            field_instance.write(data)
                            field_instance.finalize()
                            field_instance.close()
@@ -1538,9 +1537,16 @@ class FormParser(object):
         'UPLOAD_ERROR_ON_BAD_CTE': False,
     }
 
-    def __init__(self, content_type, on_field, on_file, on_end=None,
-                 boundary=None, file_name=None, file_class=File,
-                 field_class=Field, config=None):
+    def __init__(self,
+                 content_type: str,
+                 on_field,
+                 on_file,
+                 on_end=None,
+                 boundary=None,
+                 file_name=None,
+                 file_class=File,
+                 field_class=Field,
+                 config=None) -> None:
 
         self.logger = logging.getLogger(__name__)
 
@@ -1548,7 +1554,7 @@ class FormParser(object):
         self.content_type = content_type
         self.boundary = boundary
         self.bytes_received = 0
-        self.parser = None
+        self.parser: Optional[BaseParser] = None
 
         # Save callbacks.
         self.on_field = on_field
@@ -1565,22 +1571,23 @@ class FormParser(object):
 
         # Depending on the Content-Type, we instantiate the correct parser.
         if content_type == 'application/octet-stream':
-            # Work around the lack of 'nonlocal' in Py2
-            class vars(object):
-                f = None
+            f: Any = None
 
-            def on_start():
-                vars.f = file_class(file_name, None, config=self.config)
+            def on_start() -> None:
+                nonlocal f
+                f = file_class(file_name, None, config=self.config)
 
-            def on_data(data, start, end):
-                vars.f.write(data[start:end])
+            def on_data(data, start, end) -> None:
+                nonlocal f
+                f.write(data[start:end])
 
-            def on_end():
+            def on_end() -> None:
+                nonlocal f
                 # Finalize the file itself.
-                vars.f.finalize()
+                f.finalize()
 
                 # Call our callback.
-                on_file(vars.f)
+                on_file(f)
 
                 # Call the on-end callback.
                 if self.on_end is not None:
@@ -1592,44 +1599,47 @@ class FormParser(object):
                 'on_end': on_end,
             }
 
-            # Instantiate an octet-stream parser
-            parser = OctetStreamParser(callbacks,
-                                       max_size=self.config['MAX_BODY_SIZE'])
+            max_body_size = self.config['MAX_BODY_SIZE']
+
+            assert isinstance(max_body_size, int)
+
+            parser = OctetStreamParser(callbacks, max_size=max_body_size)
 
         elif (content_type == 'application/x-www-form-urlencoded' or
               content_type == 'application/x-url-encoded'):
 
             name_buffer = []
 
-            class vars(object):
-                f = None
+            f = None
 
-            def on_field_start():
+            def on_field_start() -> None:
                 pass
 
-            def on_field_name(data, start, end):
+            def on_field_name(data, start: int, end: int) -> None:
                 name_buffer.append(data[start:end])
 
-            def on_field_data(data, start, end):
-                if vars.f is None:
-                    vars.f = field_class(b''.join(name_buffer))
+            def on_field_data(data, start: int, end: int) -> None:
+                nonlocal f
+                if f is None:
+                    f = field_class(b''.join(name_buffer))
                     del name_buffer[:]
-                vars.f.write(data[start:end])
+                f.write(data[start:end])
 
             def on_field_end():
+                nonlocal f
                 # Finalize and call callback.
-                if vars.f is None:
+                if f is None:
                     # If we get here, it's because there was no field data.
                     # We create a field, set it to None, and then continue.
-                    vars.f = field_class(b''.join(name_buffer))
+                    f = field_class(b''.join(name_buffer))
                     del name_buffer[:]
-                    vars.f.set_none()
+                    f.set_none()
 
-                vars.f.finalize()
-                on_field(vars.f)
-                vars.f = None
+                f.finalize()
+                on_field(f)
+                f = None
 
-            def on_end():
+            def on_end() -> None:
                 if self.on_end is not None:
                     self.on_end()
 
@@ -1657,41 +1667,45 @@ class FormParser(object):
             header_value = []
             headers = {}
 
-            # No 'nonlocal' on Python 2 :-(
-            class vars(object):
-                f = None
-                writer = None
-                is_file = False
+            f = None
+            writer = None
+            is_file = False
 
-            def on_part_begin():
+            def on_part_begin() -> None:
                 pass
 
-            def on_part_data(data, start, end):
-                bytes_processed = vars.writer.write(data[start:end])
+            def on_part_data(data, start: int, end: int) -> None:
+                nonlocal writer
+                bytes_processed = writer.write(data[start:end])
                 # TODO: check for error here.
                 return bytes_processed
 
-            def on_part_end():
-                vars.f.finalize()
-                if vars.is_file:
-                    on_file(vars.f)
+            def on_part_end() -> None:
+                nonlocal f
+                nonlocal is_file
+                f.finalize()
+                if is_file:
+                    on_file(f)
                 else:
-                    on_field(vars.f)
+                    on_field(f)
 
-            def on_header_field(data, start, end):
+            def on_header_field(data, start: int, end: int) -> None:
                 header_name.append(data[start:end])
 
-            def on_header_value(data, start, end):
+            def on_header_value(data, start: int, end: int) -> None:
                 header_value.append(data[start:end])
 
-            def on_header_end():
+            def on_header_end() -> None:
                 headers[b''.join(header_name)] = b''.join(header_value)
                 del header_name[:]
                 del header_value[:]
 
-            def on_headers_finished():
+            def on_headers_finished() -> None:
+                nonlocal is_file
+                nonlocal f
+                nonlocal writer
                 # Reset the 'is file' flag.
-                vars.is_file = False
+                is_file = False
 
                 # Parse the content-disposition header.
                 # TODO: handle mixed case
@@ -1705,10 +1719,10 @@ class FormParser(object):
 
                 # Create the proper class.
                 if file_name is None:
-                    vars.f = field_class(field_name)
+                    f = field_class(field_name)
                 else:
-                    vars.f = file_class(file_name, field_name, config=self.config)
-                    vars.is_file = True
+                    f = file_class(file_name, field_name, config=self.config)
+                    is_file = True
 
                 # Parse the given Content-Transfer-Encoding to determine what
                 # we need to do with the incoming data.
@@ -1719,13 +1733,13 @@ class FormParser(object):
                 if (transfer_encoding == b'binary' or
                         transfer_encoding == b'8bit' or
                         transfer_encoding == b'7bit'):
-                    vars.writer = vars.f
+                    writer = f
 
                 elif transfer_encoding == b'base64':
-                    vars.writer = Base64Decoder(vars.f)
+                    writer = Base64Decoder(f)
 
                 elif transfer_encoding == b'quoted-printable':
-                    vars.writer = QuotedPrintableDecoder(vars.f)
+                    writer = QuotedPrintableDecoder(f)
 
                 else:
                     self.logger.warning("Unknown Content-Transfer-Encoding: "
@@ -1739,10 +1753,10 @@ class FormParser(object):
                     else:
                         # If we aren't erroring, then we just treat this as an
                         # unencoded Content-Transfer-Encoding.
-                        vars.writer = vars.f
+                        writer = f
 
-            def on_end():
-                vars.writer.finalize()
+            def on_end() -> None:
+                writer.finalize()
                 if self.on_end is not None:
                     self.on_end()
 
@@ -1770,35 +1784,36 @@ class FormParser(object):
 
         self.parser = parser
 
-    def write(self, data):
-        """Write some data.  The parser will forward this to the appropriate
+    def write(self, data: bytes) -> int:
+        """
+        Write some data.  The parser will forward this to the appropriate
         underlying parser.
-
-        :param data: a bytestring
         """
         self.bytes_received += len(data)
         # TODO: check the parser's return value for errors?
         return self.parser.write(data)
 
-    def finalize(self):
+    def finalize(self) -> None:
         """Finalize the parser."""
         if self.parser is not None and hasattr(self.parser, 'finalize'):
             self.parser.finalize()
 
-    def close(self):
+    def close(self) -> None:
         """Close the parser."""
         if self.parser is not None and hasattr(self.parser, 'close'):
             self.parser.close()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "%s(content_type=%r, parser=%r)" % (
             self.__class__.__name__,
             self.content_type,
-            self.parser,
-        )
+            self.parser)
 
 
-def create_form_parser(headers, on_field, on_file, config=None):
+def create_form_parser(headers,
+                       on_field: Callable,
+                       on_file: Callable,
+                       config: Dict[str, Any]=None):
     """This function is a helper function to aid in creating a FormParser
     instances.  Given a dictionary-like headers object, it will determine
     the correct information needed, instantiate a FormParser with the
@@ -1842,7 +1857,10 @@ def create_form_parser(headers, on_field, on_file, config=None):
     return form_parser
 
 
-def parse_form(headers, input_stream, on_field, on_file):
+def parse_form(headers,
+               input_stream,
+               on_field: Callable,
+               on_file: Callable) -> None:
     """This function is useful if you just want to parse a request body,
     without too much work.  Pass it a dictionary-like object of the request's
     headers, and a file-like object for the input stream, along with two
