@@ -1195,7 +1195,7 @@ class TestFormParser(unittest.TestCase):
 
         # Create form parser setting the maximum length that we can process to
         # be halfway through the given data.
-        size = len(test_data) / 2
+        size = len(test_data) // 2
         self.make('boundary', config={'MAX_BODY_SIZE': size})
 
         i = self.f.write(test_data)

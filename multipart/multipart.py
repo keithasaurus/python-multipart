@@ -118,7 +118,7 @@ def _parse_options_header_bytes(value: bytes) -> Tuple[bytes, Dict]:
         return ctype, options
 
 
-def parse_options_header(value: Union[str, bytes]):
+def parse_options_header(value: Union[None, str, bytes]) -> Tuple[bytes, Dict]:
     """
     Parses a Content-Type header into a value in the following format:
         (content_type, {parameters})
@@ -608,6 +608,9 @@ class BaseParser(object):
 
     def finalize(self):
         pass                # pragma: no cover
+
+    def write(self, data: bytes) -> int:
+        raise NotImplementedError
 
     def __repr__(self):
         return "%s()" % self.__class__.__name__
@@ -1554,7 +1557,6 @@ class FormParser(object):
         self.content_type = content_type
         self.boundary = boundary
         self.bytes_received = 0
-        self.parser: Optional[BaseParser] = None
 
         # Save callbacks.
         self.on_field = on_field
@@ -1568,6 +1570,10 @@ class FormParser(object):
         # Set configuration options.
         self.config = self.DEFAULT_CONFIG.copy()
         self.config.update(empty_dict_if_none(config))
+
+        max_body_size = self.config['MAX_BODY_SIZE']
+
+        assert isinstance(max_body_size, int)
 
         # Depending on the Content-Type, we instantiate the correct parser.
         if content_type == 'application/octet-stream':
@@ -1599,11 +1605,8 @@ class FormParser(object):
                 'on_end': on_end,
             }
 
-            max_body_size = self.config['MAX_BODY_SIZE']
-
-            assert isinstance(max_body_size, int)
-
-            parser = OctetStreamParser(callbacks, max_size=max_body_size)
+            self.parser: BaseParser = OctetStreamParser(callbacks,
+                                                        max_size=max_body_size)
 
         elif (content_type == 'application/x-www-form-urlencoded' or
               content_type == 'application/x-url-encoded'):
@@ -1653,9 +1656,9 @@ class FormParser(object):
             }
 
             # Instantiate parser.
-            parser = QuerystringParser(
+            self.parser = QuerystringParser(
                 callbacks=callbacks,
-                max_size=self.config['MAX_BODY_SIZE']
+                max_size=max_body_size
             )
 
         elif content_type == 'multipart/form-data':
@@ -1676,6 +1679,7 @@ class FormParser(object):
 
             def on_part_data(data, start: int, end: int) -> None:
                 nonlocal writer
+                assert writer is not None
                 bytes_processed = writer.write(data[start:end])
                 # TODO: check for error here.
                 return bytes_processed
@@ -1756,6 +1760,7 @@ class FormParser(object):
                         writer = f
 
             def on_end() -> None:
+                assert writer is not None
                 writer.finalize()
                 if self.on_end is not None:
                     self.on_end()
@@ -1773,16 +1778,15 @@ class FormParser(object):
             }
 
             # Instantiate a multipart parser.
-            parser = MultipartParser(boundary, callbacks,
-                                     max_size=self.config['MAX_BODY_SIZE'])
+            self.parser = MultipartParser(boundary,
+                                          callbacks,
+                                          max_size=max_body_size)
 
         else:
             self.logger.warning("Unknown Content-Type: %r", content_type)
             raise FormParserError("Unknown Content-Type: {0}".format(
                 content_type
             ))
-
-        self.parser = parser
 
     def write(self, data: bytes) -> int:
         """
