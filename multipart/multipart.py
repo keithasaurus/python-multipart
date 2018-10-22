@@ -494,10 +494,10 @@ class BaseParser(object):
         self.logger: logging.Logger = logging.getLogger(__name__)
 
     def close(self):
-        pass                # pragma: no cover
+        pass
 
     def finalize(self):
-        pass                # pragma: no cover
+        pass
 
     def write(self, data: bytes) -> int:
         raise NotImplementedError
