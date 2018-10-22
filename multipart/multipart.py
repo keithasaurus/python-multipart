@@ -129,6 +129,10 @@ def parse_options_header(value: Union[None, str, bytes]) -> Tuple[bytes, Dict]:
     )
 
 
+def always_none(*args, **kwargs) -> None:
+    return None
+
+
 class Field(object):
     """A Field object represents a (parsed) form field.  It represents a single
     field with a corresponding name and value.
@@ -507,50 +511,8 @@ def get_temp_file_details(
 
 
 class BaseParser(object):
-    """This class is the base class for all parsers.  It contains the logic for
-    calling and adding callbacks.
-
-    A callback can be one of two different forms.  "Notification callbacks" are
-    callbacks that are called when something happens - for example, when a new
-    part of a multipart message is encountered by the parser.  "Data callbacks"
-    are called when we get some sort of data - for example, part of the body of
-    a multipart chunk.  Notification callbacks are called with no parameters,
-    whereas data callbacks are called with three, as follows::
-
-        data_callback(data, start, end)
-
-    The "data" parameter is a bytestring (i.e. "foo" on Python 2, or b"foo" on
-    Python 3).  "start" and "end" are integer indexes into the "data" string
-    that represent the data of interest.  Thus, in a data callback, the slice
-    `data[start:end]` represents the data that the callback is "interested in".
-    The callback is not passed a copy of the data, since copying severely hurts
-    performance.
-    """
     def __init__(self) -> None:
         self.logger: logging.Logger = logging.getLogger(__name__)
-        self.callbacks: Dict[str, Callable] = {}
-
-    def callback(self,
-                 name: str,
-                 # todo: data is Optional[bytes]?
-                 data: Optional[Any]=None,
-                 start: Optional[int]=None,
-                 end: Optional[int]=None) -> None:
-        # todo: remove this shitty method
-        func = self.callbacks.get("on_" + name)
-
-        if func is None:
-            return None
-        elif data is not None:
-            # Don't do anything if we have start == end.
-            if start is not None and start == end:
-                return None
-
-            self.logger.debug("Calling %s with data[%d:%d]", name, start, end)
-            func(data, start, end)
-        else:
-            self.logger.debug("Calling %s with no data", name)
-            func()
 
     def close(self):
         pass                # pragma: no cover
@@ -586,23 +548,20 @@ class OctetStreamParser(BaseParser):
          - None
          - Called when the parser is finished parsing all data.
 
-    :param callbacks: A dictionary of callbacks.  See the documentation for
-                      :class:`BaseParser`.
-
     :param max_size: The maximum size of body to parse.  Defaults to infinity -
                      i.e. unbounded.
     """
     def __init__(self,
-                 callbacks: Dict[str, Callable]=None,
-                 max_size: int=MAX_INT) -> None:
-        super(OctetStreamParser, self).__init__()
-
-        callbacks = empty_dict_if_none(callbacks)
+                 max_size: int=MAX_INT,
+                 on_start: Callable[[], None]=always_none,
+                 on_data: Callable[[bytes, int, int], None]=always_none,
+                 on_end: Callable[[], None]=always_none) -> None:
+        super().__init__()
 
         self._started = False
-        self.on_start = callbacks.get('on_start', always_none)
-        self.on_end = callbacks.get('on_end', always_none)
-        self.on_data = callbacks.get('on_data', always_none)
+        self.on_start = on_start
+        self.on_end = on_end
+        self.on_data = on_data
 
         if not isinstance(max_size, Number) or max_size < 1:
             raise ValueError("max_size must be a positive number, not %r" %
@@ -795,10 +754,6 @@ def query_string_parser_internal_write(
     return state, found_sep
 
 
-def always_none(*args, **kwargs) -> None:
-    return None
-
-
 class QuerystringParser(BaseParser):
     """This is a streaming querystring parser.  It will consume data, and call
     the callbacks given when it has data.
@@ -826,9 +781,6 @@ class QuerystringParser(BaseParser):
          - None
          - Called when the parser is finished parsing all data.
 
-    :param callbacks: A dictionary of callbacks.  See the documentation for
-                      :class:`BaseParser`.
-
     :param strict_parsing: Whether or not to parse the body strictly.  Defaults
                            to False.  If this is set to True, then the behavior
                            of the parser changes as the following: if a field
@@ -845,13 +797,16 @@ class QuerystringParser(BaseParser):
                      i.e. unbounded.
     """
     def __init__(self,
-                 callbacks: Dict[str, Callable]=None,
                  strict_parsing: bool=False,
-                 max_size: int=MAX_INT) -> None:
+                 max_size: int=MAX_INT,
+                 on_field_start: Callable[[], None]=always_none,
+                 on_field_end: Callable[[], None]=always_none,
+                 on_field_name: Callable[[bytes, int, int], None]=always_none,
+                 on_field_data: Callable[[bytes, int, int], None]=always_none,
+                 on_end: Callable[[], None]=always_none
+                 ) -> None:
         super().__init__()
         self.state = STATE_BEFORE_FIELD
-
-        callbacks = empty_dict_if_none(callbacks)
 
         # Max-size stuff
         if not isinstance(max_size, Number) or max_size < 1:
@@ -860,11 +815,11 @@ class QuerystringParser(BaseParser):
         self.max_size: int = max_size
         self._current_size: int = 0
         self._found_sep: bool = False
-        self.on_field_start = callbacks.get('on_field_start', always_none)
-        self.on_field_end = callbacks.get('on_field_end', always_none)
-        self.on_field_name = callbacks.get('on_field_name', always_none)
-        self.on_field_data = callbacks.get('on_field_data', always_none)
-        self.on_end = callbacks.get('on_end', always_none)
+        self.on_field_start = on_field_start
+        self.on_field_end = on_field_end
+        self.on_field_name = on_field_name
+        self.on_field_data = on_field_data
+        self.on_end = on_end
 
         # Should parsing be strict?
         self.strict_parsing: bool = strict_parsing
@@ -974,28 +929,39 @@ class MultipartParser(BaseParser):
                      what is given in the HTTP request - usually in the
                      Content-Type header.
 
-    :param callbacks: A dictionary of callbacks.  See the documentation for
-                      :class:`BaseParser`.
-
     :param max_size: The maximum size of body to parse.  Defaults to infinity -
                      i.e. unbounded.
     """
 
     def __init__(self,
                  boundary: Union[str, bytes],
-                 callbacks: Dict[str, Callable]=None,
-                 max_size: int=MAX_INT) -> None:
+                 max_size: int=MAX_INT,
+                 on_part_begin: Callable=always_none,
+                 on_part_data: Callable=always_none,
+                 on_part_end: Callable=always_none,
+                 on_header_field: Callable=always_none,
+                 on_header_value: Callable=always_none,
+                 on_header_end: Callable=always_none,
+                 on_headers_finished: Callable=always_none,
+                 on_end: Callable=always_none
+                 ) -> None:
         super().__init__()
         self.state = STATE_START
         self.index = self.flags = 0
-
-        self.callbacks = empty_dict_if_none(callbacks)
 
         if not isinstance(max_size, Number) or max_size < 1:
             raise ValueError("max_size must be a positive number, not %r" %
                              max_size)
         self.max_size: int = max_size
         self._current_size: int = 0
+        self.on_part_begin = on_part_begin
+        self.on_part_data = on_part_data
+        self.on_part_end = on_part_end
+        self.on_header_field = on_header_field
+        self.on_header_value = on_header_value
+        self.on_header_end = on_header_end
+        self.on_headers_finished = on_headers_finished
+        self.on_end = on_end
 
         # Setup marks.  These are used to track the state of data recieved.
         self.marks = {}
@@ -1082,16 +1048,17 @@ class MultipartParser(BaseParser):
             if marked_index is None:
                 return
 
+            callback = getattr(self, f'on_{name}')
             # If we're getting remaining data, we ignore the current i value
             # and just call with the remaining data.
             if remaining:
-                self.callback(name, data, marked_index, length)
+                callback(data, marked_index, length)
                 self.marks[name] = 0
 
             # Otherwise, we call it from the mark to the current byte we're
             # processing.
             else:
-                self.callback(name, data, marked_index, i)
+                callback(data, marked_index, i)
                 self.marks.pop(name, None)
 
         # For each byte...
@@ -1139,7 +1106,7 @@ class MultipartParser(BaseParser):
                     index = 0
 
                     # Callback for the start of a part.
-                    self.callback('part_begin')
+                    self.on_part_begin()
 
                     # Move to the next character and state.
                     state = STATE_HEADER_FIELD_START
@@ -1232,7 +1199,7 @@ class MultipartParser(BaseParser):
                 # we do nothing and just move past this character.
                 if c == CR:
                     data_callback('header_value')
-                    self.callback('header_end')
+                    self.on_header_end()
                     state = STATE_HEADER_VALUE_ALMOST_DONE
 
             elif state == STATE_HEADER_VALUE_ALMOST_DONE:
@@ -1261,7 +1228,7 @@ class MultipartParser(BaseParser):
                     e.offset = i
                     raise e
 
-                self.callback('headers_finished')
+                self.on_headers_finished()
                 state = STATE_PART_DATA_START
 
             elif state == STATE_PART_DATA_START:
@@ -1354,8 +1321,8 @@ class MultipartParser(BaseParser):
 
                             # Callback indicating that we've reached the end of
                             # a part, and are starting a new one.
-                            self.callback('part_end')
-                            self.callback('part_begin')
+                            self.on_part_end()
+                            self.on_part_begin()
 
                             # Move to parsing new headers.
                             index = 0
@@ -1375,8 +1342,8 @@ class MultipartParser(BaseParser):
                         if c == HYPHEN:
                             # Callback to end the current part, and then the
                             # message.
-                            self.callback('part_end')
-                            self.callback('end')
+                            self.on_part_end()
+                            self.on_end()
                             state = STATE_END
                         else:
                             # No match, so reset index.
@@ -1392,9 +1359,8 @@ class MultipartParser(BaseParser):
                 # thought was part of our boundary and send it along as actual
                 # data.
                 elif prev_index > 0:
-                    # Callback to write the saved data.
-                    lb_data = join_bytes(self.lookbehind)
-                    self.callback('part_data', lb_data, 0, prev_index)
+                    # write the saved data
+                    self.on_part_data(join_bytes(self.lookbehind), 0, prev_index)
 
                     # Overwrite our previous index.
                     prev_index = 0
@@ -1583,14 +1549,11 @@ class FormParser(object):
                 if self.on_end is not None:
                     self.on_end()
 
-            callbacks = {
-                'on_start': on_start,
-                'on_data': on_data,
-                'on_end': on_end,
-            }
-
-            self.parser: BaseParser = OctetStreamParser(callbacks,
-                                                        max_size=max_body_size)
+            self.parser: BaseParser = OctetStreamParser(
+                max_size=max_body_size,
+                on_start=on_start,
+                on_data=on_data,
+                on_end=on_end)
 
         elif (content_type == 'application/x-www-form-urlencoded' or
               content_type == 'application/x-url-encoded'):
@@ -1629,20 +1592,15 @@ class FormParser(object):
             def on_end() -> None:
                 if self.on_end is not None:
                     self.on_end()
-
-            # Setup callbacks.
-            callbacks = {
-                'on_field_start': on_field_start,
-                'on_field_name': on_field_name,
-                'on_field_data': on_field_data,
-                'on_field_end': on_field_end,
-                'on_end': on_end,
-            }
-
+ 
             # Instantiate parser.
             self.parser = QuerystringParser(
-                callbacks=callbacks,
-                max_size=max_body_size
+                max_size=max_body_size,
+                on_field_start=on_field_start,
+                on_field_name=on_field_name,
+                on_field_data=on_field_data,
+                on_field_end=on_field_end,
+                on_end=on_end,
             )
 
         elif content_type == 'multipart/form-data':
@@ -1749,22 +1707,17 @@ class FormParser(object):
                 if self.on_end is not None:
                     self.on_end()
 
-            # These are our callbacks for the parser.
-            callbacks = {
-                'on_part_begin': on_part_begin,
-                'on_part_data': on_part_data,
-                'on_part_end': on_part_end,
-                'on_header_field': on_header_field,
-                'on_header_value': on_header_value,
-                'on_header_end': on_header_end,
-                'on_headers_finished': on_headers_finished,
-                'on_end': on_end,
-            }
-
             # Instantiate a multipart parser.
             self.parser = MultipartParser(boundary,
-                                          callbacks,
-                                          max_size=max_body_size)
+                                          max_size=max_body_size,
+                                          on_part_begin=on_part_begin,
+                                          on_part_data=on_part_data,
+                                          on_part_end=on_part_end,
+                                          on_header_field=on_header_field,
+                                          on_header_value=on_header_value,
+                                          on_header_end=on_header_end,
+                                          on_headers_finished=on_headers_finished,
+                                          on_end=on_end)
 
         else:
             self.logger.warning("Unknown Content-Type: %r", content_type)

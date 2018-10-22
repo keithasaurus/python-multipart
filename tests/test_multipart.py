@@ -14,7 +14,6 @@ from multipart.multipart import (
     Field,
     File,
     FormParser,
-    MultipartParser,
     OctetStreamParser,
     parse_form,
     parse_options_header,
@@ -308,7 +307,7 @@ class TestQuerystringParser(unittest.TestCase):
             'on_field_end': on_field_end
         }
 
-        self.p = QuerystringParser(callbacks)
+        self.p = QuerystringParser(**callbacks)
 
     def test_simple_querystring(self):
         self.p.write(b'foo=bar')
@@ -462,15 +461,13 @@ class TestOctetStreamParser(unittest.TestCase):
         def on_end():
             self.finished += 1
 
-        callbacks = {
-            'on_start': on_start,
-            'on_data': on_data,
-            'on_end': on_end
-        }
+        self.p = OctetStreamParser(
+            on_start=on_start,
+            on_data=on_data,
+            on_end=on_end
+        )
 
-        self.p = OctetStreamParser(callbacks)
-
-    def assert_data(self, data, finalize=True):
+    def assert_data(self, data):
         self.assertEqual(b''.join(self.d), data)
         self.d = []
 
@@ -517,10 +514,6 @@ class TestOctetStreamParser(unittest.TestCase):
 
         self.assert_data(b'01234')
         self.assert_finished()
-
-    def test_invalid_max_size(self):
-        with self.assertRaises(ValueError):
-            OctetStreamParser(max_size='foo')
 
 
 class TestBase64Decoder(unittest.TestCase):
@@ -717,7 +710,10 @@ class TestFormParser(unittest.TestCase):
             self.ended = True
 
         # Get a form-parser instance.
-        self.f = FormParser('multipart/form-data', on_field, on_file, on_end,
+        self.f = FormParser('multipart/form-data',
+                            on_field,
+                            on_file,
+                            on_end,
                             boundary=boundary, config=config)
 
     def assert_file_data(self, f, data):
@@ -1221,10 +1217,6 @@ class TestFormParser(unittest.TestCase):
         f.finalize()
 
         self.assert_file_data(files[0], b'0123456789')
-
-    def test_invalid_max_size_multipart(self):
-        with self.assertRaises(ValueError):
-            MultipartParser(b'bound', max_size='foo')
 
 
 class TestHelperFunctions(unittest.TestCase):
