@@ -588,6 +588,7 @@ class BaseParser(object):
                  data: Optional[Any]=None,
                  start: Optional[int]=None,
                  end: Optional[int]=None) -> None:
+        # todo: remoeve this shitty method
         func = self.callbacks.get("on_" + name)
 
         if func is None:
@@ -690,6 +691,161 @@ class OctetStreamParser(BaseParser):
         return f"{self.__class__.__name__}()"
 
 
+def query_string_parser_internal_write(
+        logger: logging.Logger,
+        state: int,
+        strict_parsing: bool,
+        found_sep: bool,
+        data: bytes,
+        length: int,
+        on_field_start: Callable[[], None],
+        on_field_end: Callable[[], None],
+        on_field_name: Callable[[bytes, int, int], None],
+        on_field_data: Callable[[bytes, int, int], None]
+) -> Tuple[int, bool]:
+    strict_parsing = strict_parsing
+
+    i = 0
+    while i < length:
+        ch = data[i]
+
+        # Depending on our state...
+        if state == STATE_BEFORE_FIELD:
+            # If the 'found_sep' flag is set, we've already encountered
+            # and skipped a single seperator.  If so, we check our strict
+            # parsing flag and decide what to do.  Otherwise, we haven't
+            # yet reached a seperator, and thus, if we do, we need to skip
+            # it as it will be the boundary between fields that's supposed
+            # to be there.
+            if ch == AMPERSAND or ch == SEMICOLON:
+                if found_sep:
+                    # If we're parsing strictly, we disallow blank chunks.
+                    if strict_parsing:
+                        e = QuerystringParseError(
+                            "Skipping duplicate ampersand/semicolon at "
+                            "%d" % i
+                        )
+                        e.offset = i
+                        raise e
+                    else:
+                        logger.debug(
+                            f"Skipping duplicate ampersand/semicolon at {i}")
+                else:
+                    # This case is when we're skipping the (first)
+                    # seperator between fields, so we just set our flag
+                    # and continue on.
+                    found_sep = True
+            else:
+                # Emit a field-start event, and go to that state.  Also,
+                # reset the "found_sep" flag, for the next time we get to
+                # this state.
+                on_field_start()
+                i -= 1
+                state = STATE_FIELD_NAME
+                found_sep = False
+
+        elif state == STATE_FIELD_NAME:
+            # Try and find a seperator - we ensure that, if we do, we only
+            # look for the equal sign before it.
+            sep_pos = data.find(b'&', i)
+            if sep_pos == -1:
+                sep_pos = data.find(b';', i)
+
+            # See if we can find an equals sign in the remaining data.  If
+            # so, we can immedately emit the field name and jump to the
+            # data state.
+            if sep_pos != -1:
+                equals_pos = data.find(b'=', i, sep_pos)
+            else:
+                equals_pos = data.find(b'=', i)
+
+            if equals_pos != -1:
+                # Emit this name.
+                on_field_name(data, i, equals_pos)
+
+                # Jump i to this position.  Note that it will then have 1
+                # added to it below, which means the next iteration of this
+                # loop will inspect the character after the equals sign.
+                i = equals_pos
+                state = STATE_FIELD_DATA
+            else:
+                # No equals sign found.
+                if not strict_parsing:
+                    # See also comments in the STATE_FIELD_DATA case below.
+                    # If we found the seperator, we emit the name and just
+                    # end - there's no data callback at all (not even with
+                    # a blank value).
+                    if sep_pos != -1:
+                        on_field_name(data, i, sep_pos)
+                        on_field_end()
+
+                        i = sep_pos - 1
+                        state = STATE_BEFORE_FIELD
+                    else:
+                        # Otherwise, no seperator in this block, so the
+                        # rest of this chunk must be a name.
+                        on_field_name(data, i, length)
+                        i = length
+
+                else:
+                    # We're parsing strictly.  If we find a seperator,
+                    # this is an error - we require an equals sign.
+                    if sep_pos != -1:
+                        e = QuerystringParseError(
+                            "When strict_parsing is True, we require an "
+                            "equals sign in all field chunks. Did not "
+                            "find one in the chunk that starts at %d" %
+                            (i,)
+                        )
+                        e.offset = i
+                        raise e
+
+                    # No seperator in the rest of this chunk, so it's just
+                    # a field name.
+                    on_field_name(data, i, length)
+                    i = length
+
+        elif state == STATE_FIELD_DATA:
+            # Try finding either an ampersand or a semicolon after this
+            # position.
+            sep_pos = data.find(b'&', i)
+            if sep_pos == -1:
+                sep_pos = data.find(b';', i)
+
+            # If we found it, callback this bit as data and then go back
+            # to expecting to find a field.
+            if sep_pos != -1:
+                on_field_data(data, i, sep_pos)
+                on_field_end()
+
+                # Note that we go to the separator, which brings us to the
+                # "before field" state.  This allows us to properly emit
+                # "field_start" events only when we actually have data for
+                # a field of some sort.
+                i = sep_pos - 1
+                state = STATE_BEFORE_FIELD
+
+            # Otherwise, emit the rest as data and finish.
+            else:
+                on_field_data(data, i, length)
+                i = length
+
+        else:
+            msg = "Reached an unknown state %d at %d" % (state, i)
+            logger.warning(msg)
+            e = QuerystringParseError(msg)
+            e.offset = i
+            raise e
+
+        i += 1
+
+    return state, found_sep
+
+
+def always_none(*args, **kwargs) -> None:
+    return None
+
+
 class QuerystringParser(BaseParser):
     """This is a streaming querystring parser.  It will consume data, and call
     the callbacks given when it has data.
@@ -741,7 +897,6 @@ class QuerystringParser(BaseParser):
                  max_size: int=MAX_INT) -> None:
         super().__init__()
         self.state = STATE_BEFORE_FIELD
-        self._found_sep = False
 
         self.callbacks = empty_dict_if_none(callbacks)
 
@@ -751,6 +906,12 @@ class QuerystringParser(BaseParser):
                              max_size)
         self.max_size: int = max_size
         self._current_size: int = 0
+        self._found_sep: bool = False
+        self.on_field_start = callbacks.get('on_field_start', always_none)
+        self.on_field_end = callbacks.get('on_field_end', always_none)
+        self.on_field_name = callbacks.get('on_field_name', always_none)
+        self.on_field_data = callbacks.get('on_field_data', always_none)
+        self.on_end = callbacks.get('on_end', always_none)
 
         # Should parsing be strict?
         self.strict_parsing: bool = strict_parsing
@@ -775,155 +936,25 @@ class QuerystringParser(BaseParser):
             data_len = new_size
 
         length: int = 0
+
         try:
-            length = self._internal_write(data, data_len)
+            self.state, self._found_sep = query_string_parser_internal_write(
+                self.logger,
+                self.state,
+                self.strict_parsing,
+                self._found_sep,
+                data,
+                data_len,
+                self.on_field_start,
+                self.on_field_end,
+                self.on_field_name,
+                self.on_field_data
+            )
+            length = len(data)
         finally:
             self._current_size += length
 
         return length
-
-    def _internal_write(self, data, length) -> int:
-        state = self.state
-        strict_parsing = self.strict_parsing
-        found_sep = self._found_sep
-
-        i = 0
-        while i < length:
-            ch = data[i]
-
-            # Depending on our state...
-            if state == STATE_BEFORE_FIELD:
-                # If the 'found_sep' flag is set, we've already encountered
-                # and skipped a single seperator.  If so, we check our strict
-                # parsing flag and decide what to do.  Otherwise, we haven't
-                # yet reached a seperator, and thus, if we do, we need to skip
-                # it as it will be the boundary between fields that's supposed
-                # to be there.
-                if ch == AMPERSAND or ch == SEMICOLON:
-                    if found_sep:
-                        # If we're parsing strictly, we disallow blank chunks.
-                        if strict_parsing:
-                            e = QuerystringParseError(
-                                "Skipping duplicate ampersand/semicolon at "
-                                "%d" % i
-                            )
-                            e.offset = i
-                            raise e
-                        else:
-                            self.logger.debug("Skipping duplicate ampersand/"
-                                              "semicolon at %d", i)
-                    else:
-                        # This case is when we're skipping the (first)
-                        # seperator between fields, so we just set our flag
-                        # and continue on.
-                        found_sep = True
-                else:
-                    # Emit a field-start event, and go to that state.  Also,
-                    # reset the "found_sep" flag, for the next time we get to
-                    # this state.
-                    self.callback('field_start')
-                    i -= 1
-                    state = STATE_FIELD_NAME
-                    found_sep = False
-
-            elif state == STATE_FIELD_NAME:
-                # Try and find a seperator - we ensure that, if we do, we only
-                # look for the equal sign before it.
-                sep_pos = data.find(b'&', i)
-                if sep_pos == -1:
-                    sep_pos = data.find(b';', i)
-
-                # See if we can find an equals sign in the remaining data.  If
-                # so, we can immedately emit the field name and jump to the
-                # data state.
-                if sep_pos != -1:
-                    equals_pos = data.find(b'=', i, sep_pos)
-                else:
-                    equals_pos = data.find(b'=', i)
-
-                if equals_pos != -1:
-                    # Emit this name.
-                    self.callback('field_name', data, i, equals_pos)
-
-                    # Jump i to this position.  Note that it will then have 1
-                    # added to it below, which means the next iteration of this
-                    # loop will inspect the character after the equals sign.
-                    i = equals_pos
-                    state = STATE_FIELD_DATA
-                else:
-                    # No equals sign found.
-                    if not strict_parsing:
-                        # See also comments in the STATE_FIELD_DATA case below.
-                        # If we found the seperator, we emit the name and just
-                        # end - there's no data callback at all (not even with
-                        # a blank value).
-                        if sep_pos != -1:
-                            self.callback('field_name', data, i, sep_pos)
-                            self.callback('field_end')
-
-                            i = sep_pos - 1
-                            state = STATE_BEFORE_FIELD
-                        else:
-                            # Otherwise, no seperator in this block, so the
-                            # rest of this chunk must be a name.
-                            self.callback('field_name', data, i, length)
-                            i = length
-
-                    else:
-                        # We're parsing strictly.  If we find a seperator,
-                        # this is an error - we require an equals sign.
-                        if sep_pos != -1:
-                            e = QuerystringParseError(
-                                "When strict_parsing is True, we require an "
-                                "equals sign in all field chunks. Did not "
-                                "find one in the chunk that starts at %d" %
-                                (i,)
-                            )
-                            e.offset = i
-                            raise e
-
-                        # No seperator in the rest of this chunk, so it's just
-                        # a field name.
-                        self.callback('field_name', data, i, length)
-                        i = length
-
-            elif state == STATE_FIELD_DATA:
-                # Try finding either an ampersand or a semicolon after this
-                # position.
-                sep_pos = data.find(b'&', i)
-                if sep_pos == -1:
-                    sep_pos = data.find(b';', i)
-
-                # If we found it, callback this bit as data and then go back
-                # to expecting to find a field.
-                if sep_pos != -1:
-                    self.callback('field_data', data, i, sep_pos)
-                    self.callback('field_end')
-
-                    # Note that we go to the seperator, which brings us to the
-                    # "before field" state.  This allows us to properly emit
-                    # "field_start" events only when we actually have data for
-                    # a field of some sort.
-                    i = sep_pos - 1
-                    state = STATE_BEFORE_FIELD
-
-                # Otherwise, emit the rest as data and finish.
-                else:
-                    self.callback('field_data', data, i, length)
-                    i = length
-
-            else:                   # pragma: no cover (error case)
-                msg = "Reached an unknown state %d at %d" % (state, i)
-                self.logger.warning(msg)
-                e = QuerystringParseError(msg)
-                e.offset = i
-                raise e
-
-            i += 1
-
-        self.state = state
-        self._found_sep = found_sep
-        return len(data)
 
     def finalize(self) -> None:
         """Finalize this parser, which signals to that we are finished parsing,
@@ -932,8 +963,8 @@ class QuerystringParser(BaseParser):
         """
         # If we're currently in the middle of a field, we finish it.
         if self.state == STATE_FIELD_DATA:
-            self.callback('field_end')
-        self.callback('end')
+            self.on_field_end()
+        self.on_end()
 
     def __repr__(self) -> str:
         return "%s(strict_parsing=%r, max_size=%r)" % (
