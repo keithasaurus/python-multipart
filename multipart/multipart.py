@@ -144,8 +144,8 @@ class Field(object):
 
     :param name: the name of the form field
     """
-    def __init__(self, name):
-        self._name = name
+    def __init__(self, field_name):
+        self.field_name = field_name
         self._value = []
 
         # We cache the joined version of _value for speed.
@@ -211,11 +211,6 @@ class Field(object):
         support writing None, this function will set the field value to None.
         """
         self._cache = None
-
-    @property
-    def field_name(self):
-        """This property returns the name of the field."""
-        return self._name
 
     @property
     def value(self) -> bytes:
@@ -326,65 +321,23 @@ class File(object):
         # Save configuration, set other variables default.
         self.logger = logging.getLogger(__name__)
         self._config = empty_dict_if_none(config)
-        self._in_memory = True
-        self._bytes_written = 0
-        self._fileobj = BytesIO()
+        self.in_memory = True
+        self.size = 0
+        self.file_object = BytesIO()
 
         # Save the provided field/file name.
-        self._field_name = field_name
-        self._file_name = file_name
+        self.field_name = field_name
+        self.file_name = file_name
 
         # Our actual file name is None by default, since, depending on our
         # config, we may not actually use the provided name.
-        self._actual_file_name: Optional[bytes] = None
+        self.actual_file_name: Optional[bytes] = None
 
         # Split the extension from the filename.
         if file_name is not None:
             base, ext = os.path.splitext(file_name)
             self._file_base = base
             self._ext: Union[str, bytes] = ext
-
-    @property
-    def field_name(self):
-        """The form field associated with this file.  May be None if there isn't
-        one, for example when we have an application/octet-stream upload.
-        """
-        return self._field_name
-
-    @property
-    def file_name(self):
-        """The file name given in the upload request.
-        """
-        return self._file_name
-
-    @property
-    def actual_file_name(self):
-        """The file name that this file is saved as.  Will be None if it's not
-        currently saved on disk.
-        """
-        return self._actual_file_name
-
-    @property
-    def file_object(self):
-        """The file object that we're currently writing to.  Note that this
-        will either be an instance of a :class:`io.BytesIO`, or a regular file
-        object.
-        """
-        return self._fileobj
-
-    @property
-    def size(self):
-        """The total size of this file, counted as the number of bytes that
-        currently have been written to the file.
-        """
-        return self._bytes_written
-
-    @property
-    def in_memory(self):
-        """A boolean representing whether or not this file object is currently
-        stored in-memory or on-disk.
-        """
-        return self._in_memory
 
     def flush_to_disk(self):
         """If the file is already on-disk, do nothing.  Otherwise, copy from
@@ -394,30 +347,30 @@ class File(object):
         Note that if you attempt to flush a file that is already on-disk, a
         warning will be logged to this module's logger.
         """
-        if not self._in_memory:
+        if not self.in_memory:
             self.logger.warning(
                 "Trying to flush to disk when we're not in memory"
             )
             return
 
         # Go back to the start of our file.
-        self._fileobj.seek(0)
+        self.file_object.seek(0)
 
         # Open a new file.
         new_file = self._get_disk_file()
 
         # Copy the file objects.
-        shutil.copyfileobj(self._fileobj, new_file)
+        shutil.copyfileobj(self.file_object, new_file)
 
         # Seek to the new position in our new file.
-        new_file.seek(self._bytes_written)
+        new_file.seek(self.size)
 
         # Reassign the fileobject.
-        old_fileobj = self._fileobj
-        self._fileobj = new_file
+        old_fileobj = self.file_object
+        self.file_object = new_file
 
         # We're no longer in memory.
-        self._in_memory = False
+        self.in_memory = False
 
         # Close the old file object.
         old_fileobj.close()
@@ -456,14 +409,11 @@ class File(object):
                                                     keep_extensions,
                                                     self)
 
-        self._actual_file_name = fname
+        self.actual_file_name = fname
         return tmp_file
 
     def write(self, data: bytes) -> int:
-        """Write some data to the File.
-
-        :param data: a bytestring
-        """
+        """ Write some data to the File. """
         return self.on_data(data)
 
     def on_data(self, data) -> int:
@@ -472,11 +422,11 @@ class File(object):
 
         :param data: a bytestring
         """
-        pos = self._fileobj.tell()
-        bwritten = self._fileobj.write(data)
+        pos = self.file_object.tell()
+        bwritten = self.file_object.write(data)
         # true file objects write  returns None
         if bwritten is None:
-            bwritten = self._fileobj.tell() - pos
+            bwritten = self.file_object.tell() - pos
 
         # If the bytes written isn't the same as the length, just return.
         if bwritten != len(data):
@@ -485,12 +435,12 @@ class File(object):
             return bwritten
 
         # Keep track of how many bytes we've written.
-        self._bytes_written += bwritten
+        self.size += bwritten
 
         # If we're in-memory and are over our limit, we create a file.
-        if (self._in_memory and
+        if (self.in_memory and
                 self._config.get('MAX_MEMORY_FILE_SIZE') is not None and
-                (self._bytes_written >
+                (self.size >
                  self._config.get('MAX_MEMORY_FILE_SIZE'))):
             self.logger.info("Flushing to disk")
             self.flush_to_disk()
@@ -502,7 +452,7 @@ class File(object):
         """This method is called whenever the Field is finalized.
         """
         # Flush the underlying file object
-        self._fileobj.flush()
+        self.file_object.flush()
 
     def finalize(self) -> None:
         """Finalize the form file.  This will not close the underlying file,
@@ -515,7 +465,7 @@ class File(object):
         file object (whether it's a :class:`io.BytesIO` or an actual file
         object).
         """
-        self._fileobj.close()
+        self.file_object.close()
 
     def __repr__(self) -> str:
         return "%s(file_name=%r, field_name=%r)" % (

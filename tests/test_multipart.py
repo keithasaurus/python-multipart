@@ -118,7 +118,7 @@ class TestFile(unittest.TestCase):
     def test_invalid_write(self):
         m = Mock()
         m.write.return_value = 5
-        self.f._fileobj = m
+        self.f.file_object = m
         v = self.f.write(b'foobar')
         self.assertEqual(v, 5)
 
