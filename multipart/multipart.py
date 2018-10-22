@@ -536,7 +536,7 @@ class BaseParser(object):
                  data: Optional[Any]=None,
                  start: Optional[int]=None,
                  end: Optional[int]=None) -> None:
-        # todo: remoeve this shitty method
+        # todo: remove this shitty method
         func = self.callbacks.get("on_" + name)
 
         if func is None:
@@ -596,8 +596,13 @@ class OctetStreamParser(BaseParser):
                  callbacks: Dict[str, Callable]=None,
                  max_size: int=MAX_INT) -> None:
         super(OctetStreamParser, self).__init__()
-        self.callbacks = empty_dict_if_none(callbacks)
+
+        callbacks = empty_dict_if_none(callbacks)
+
         self._started = False
+        self.on_start = callbacks.get('on_start', always_none)
+        self.on_end = callbacks.get('on_end', always_none)
+        self.on_data = callbacks.get('on_data', always_none)
 
         if not isinstance(max_size, Number) or max_size < 1:
             raise ValueError("max_size must be a positive number, not %r" %
@@ -610,7 +615,7 @@ class OctetStreamParser(BaseParser):
         and then pass the data to the underlying callback.
         """
         if not self._started:
-            self.callback('start')
+            self.on_start()
             self._started = True
 
         # Truncate data length.
@@ -626,14 +631,14 @@ class OctetStreamParser(BaseParser):
 
         # Increment size, then callback, in case there's an exception.
         self._current_size += data_len
-        self.callback('data', data, 0, data_len)
+        self.on_data(data, 0, data_len)
         return data_len
 
     def finalize(self) -> None:
         """Finalize this parser, which signals to that we are finished parsing,
         and sends the on_end callback.
         """
-        self.callback('end')
+        self.on_end()
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
@@ -846,7 +851,7 @@ class QuerystringParser(BaseParser):
         super().__init__()
         self.state = STATE_BEFORE_FIELD
 
-        self.callbacks = empty_dict_if_none(callbacks)
+        callbacks = empty_dict_if_none(callbacks)
 
         # Max-size stuff
         if not isinstance(max_size, Number) or max_size < 1:
