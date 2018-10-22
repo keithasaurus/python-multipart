@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from io import BytesIO
 from multipart.decoders import Base64Decoder, QuotedPrintableDecoder
 from multipart.exceptions import (
@@ -8,7 +7,6 @@ from multipart.exceptions import (
     QuerystringParseError
 )
 from numbers import Number
-from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import logging
