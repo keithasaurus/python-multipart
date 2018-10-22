@@ -233,20 +233,6 @@ class Field(object):
         else:
             return NotImplemented
 
-    def __repr__(self) -> str:
-        if len(self.value) > 97:
-            # We get the repr, and then insert three dots before the final
-            # quote.
-            v = repr(self.value[:97])[:-1] + "...'"
-        else:
-            v = repr(self.value)
-
-        return "%s(field_name=%r, value=%s)" % (
-            self.__class__.__name__,
-            self.field_name,
-            v
-        )
-
 
 def empty_dict_if_none(dict_or_none):
     return {} if dict_or_none is None else dict_or_none
@@ -471,13 +457,6 @@ class File(object):
         """
         self.file_object.close()
 
-    def __repr__(self) -> str:
-        return "%s(file_name=%r, field_name=%r)" % (
-            self.__class__.__name__,
-            self.file_name,
-            self.field_name
-        )
-
 
 def get_temp_file_details(
         file_dir: Union[None, str, bytes],
@@ -522,9 +501,6 @@ class BaseParser(object):
 
     def write(self, data: bytes) -> int:
         raise NotImplementedError
-
-    def __repr__(self):
-        return "%s()" % self.__class__.__name__
 
 
 class OctetStreamParser(BaseParser):
@@ -598,9 +574,6 @@ class OctetStreamParser(BaseParser):
         and sends the on_end callback.
         """
         self.on_end()
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}()"
 
 
 def query_string_parser_internal_write(
@@ -873,12 +846,6 @@ class QuerystringParser(BaseParser):
         if self.state == STATE_FIELD_DATA:
             self.on_field_end()
         self.on_end()
-
-    def __repr__(self) -> str:
-        return "%s(strict_parsing=%r, max_size=%r)" % (
-            self.__class__.__name__,
-            self.strict_parsing,
-            self.max_size)
 
 
 class MultipartParser(BaseParser):
@@ -1421,9 +1388,6 @@ class MultipartParser(BaseParser):
         # error or otherwise state that we're not finished parsing.
         pass
 
-    def __repr__(self) -> str:
-        return "%s(boundary=%r)" % (self.__class__.__name__, self.boundary)
-
 
 class FormParser(object):
     """This class is the all-in-one form parser.  Given all the information
@@ -1741,12 +1705,6 @@ class FormParser(object):
     def close(self) -> None:
         if self.parser is not None and hasattr(self.parser, 'close'):
             self.parser.close()
-
-    def __repr__(self) -> str:
-        return "%s(content_type=%r, parser=%r)" % (
-            self.__class__.__name__,
-            self.content_type,
-            self.parser)
 
 
 def create_form_parser(headers,

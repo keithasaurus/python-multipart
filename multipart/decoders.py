@@ -1,4 +1,5 @@
 from .exceptions import Base64Error, DecodeError
+from typing import Any
 
 import base64
 import binascii
@@ -33,11 +34,11 @@ class Base64Decoder(object):
     :param underlying: the underlying object to pass writes to
     """
 
-    def __init__(self, underlying):
+    def __init__(self, underlying: Any) -> None:
         self.cache = bytearray()
         self.underlying = underlying
 
-    def write(self, data):
+    def write(self, data) -> int:
         """Takes any input data provided, decodes it as base64, and passes it
         on to the underlying object.  If the data provided is invalid base64
         data, then this method will raise
@@ -74,14 +75,14 @@ class Base64Decoder(object):
         # Return the length of the data to indicate no error.
         return len(data)
 
-    def close(self):
+    def close(self) -> None:
         """Close this decoder.  If the underlying object has a `close()`
         method, this function will call it.
         """
         if hasattr(self.underlying, 'close'):
             self.underlying.close()
 
-    def finalize(self):
+    def finalize(self) -> None:
         """Finalize this object.  This should be called when no more data
         should be written to the stream.  This function can raise a
         :class:`multipart.exceptions.DecodeError` if there is some remaining
@@ -98,9 +99,6 @@ class Base64Decoder(object):
         if hasattr(self.underlying, 'finalize'):
             self.underlying.finalize()
 
-    def __repr__(self):
-        return "%s(underlying=%r)" % (self.__class__.__name__, self.underlying)
-
 
 class QuotedPrintableDecoder(object):
     """This object provides an interface to decode a stream of quoted-printable
@@ -111,11 +109,11 @@ class QuotedPrintableDecoder(object):
 
     :param underlying: the underlying object to pass writes to
     """
-    def __init__(self, underlying):
+    def __init__(self, underlying: Any) -> None:
         self.cache = b''
         self.underlying = underlying
 
-    def write(self, data):
+    def write(self, data) -> int:
         """Takes any input data provided, decodes it as quoted-printable, and
         passes it on to the underlying object.
 
@@ -142,14 +140,14 @@ class QuotedPrintableDecoder(object):
         self.cache = rest
         return len(data)
 
-    def close(self):
+    def close(self) -> None:
         """Close this decoder.  If the underlying object has a `close()`
         method, this function will call it.
         """
         if hasattr(self.underlying, 'close'):
             self.underlying.close()
 
-    def finalize(self):
+    def finalize(self) -> None:
         """Finalize this object.  This should be called when no more data
         should be written to the stream.  This function will not raise any
         exceptions, but it may write more data to the underlying object if
@@ -166,6 +164,3 @@ class QuotedPrintableDecoder(object):
         # Finalize our underlying stream.
         if hasattr(self.underlying, 'finalize'):
             self.underlying.finalize()
-
-    def __repr__(self):
-        return "%s(underlying=%r)" % (self.__class__.__name__, self.underlying)
