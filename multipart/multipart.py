@@ -1777,12 +1777,10 @@ class FormParser(object):
         return self.parser.write(data)
 
     def finalize(self) -> None:
-        """Finalize the parser."""
         if self.parser is not None and hasattr(self.parser, 'finalize'):
             self.parser.finalize()
 
     def close(self) -> None:
-        """Close the parser."""
         if self.parser is not None and hasattr(self.parser, 'close'):
             self.parser.close()
 
