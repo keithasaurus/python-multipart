@@ -7,9 +7,10 @@ from multipart.exceptions import (
     QuerystringParseError
 )
 from numbers import Number
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, Protocol
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing_extensions import Protocol
+from warnings import warn
 
-import logging
 import os
 import re
 import shutil
@@ -92,8 +93,6 @@ OPTION_RE_STR = (
 )
 OPTION_RE = re.compile(OPTION_RE_STR)
 QUOTE = b'"'[0]
-
-logger = logging.getLogger(__name__)
 
 
 def _parse_options_header_bytes(value: bytes) -> Tuple[bytes, Dict]:
@@ -339,9 +338,7 @@ class File(object):
         warning will be logged to this module's logger.
         """
         if not self.in_memory:
-            logger.warning(
-                "Trying to flush to disk when we're not in memory"
-            )
+            warn("Trying to flush to disk when we're not in memory")
             return
 
         # Go back to the start of our file.
@@ -367,10 +364,7 @@ class File(object):
         old_fileobj.close()
 
     def _get_disk_file(self):
-        """This function is responsible for getting a file object on-disk for us.
-        """
-        logger.info("Opening a file on disk")
-
+        """This function is responsible for getting a file object on-disk for us."""
         file_dir = self._config.get('UPLOAD_DIR')
         keep_filename = self._config.get('UPLOAD_KEEP_FILENAME', False)
         keep_extensions = self._config.get('UPLOAD_KEEP_EXTENSIONS', False)
@@ -378,8 +372,6 @@ class File(object):
 
         # If we have a directory and are to keep the filename...
         if file_dir is not None and keep_filename:
-            logger.info("Saving with filename in: %r", file_dir)
-
             # Build our filename.
             # TODO: what happens if we don't have a filename?
             fname = (self._file_base + self._ext
@@ -388,11 +380,8 @@ class File(object):
 
             path = os.path.join(file_dir, fname)
             try:
-                logger.info("Opening file: %r", path)
                 tmp_file = open(path, 'w+b')
             except (IOError, OSError) as e:
-
-                logger.exception("Error opening temporary file")
                 raise FileError("Error opening temporary file: %r" % path)
         else:
             tmp_file, fname = get_temp_file_details(file_dir,
@@ -421,8 +410,6 @@ class File(object):
 
         # If the bytes written isn't the same as the length, just return.
         if bwritten != len(data):
-            logger.warning("bwritten != len(data) (%d != %d)", bwritten,
-                                len(data))
             return bwritten
 
         # Keep track of how many bytes we've written.
@@ -433,7 +420,6 @@ class File(object):
                 self._config.get('MAX_MEMORY_FILE_SIZE') is not None and
                 (self.size >
                  self._config.get('MAX_MEMORY_FILE_SIZE'))):
-            logger.info("Flushing to disk")
             self.flush_to_disk()
 
         # Return the number of bytes written.
@@ -474,13 +460,9 @@ def get_temp_file_details(
     if file_dir is not None:
         options['dir'] = str_or_decode_bytes_system(file_dir)
 
-    # Create a temporary (named) file with the appropriate settings.
-    logger.info("Creating a temporary file with options: %r", options)
-
     try:
         tmp_file = tempfile.NamedTemporaryFile(**options)
     except (IOError, OSError):
-        logger.exception("Error creating named temporary file")
         raise FileError("Error creating named temporary file")
     else:
         fname: Union[str, bytes] = tmp_file.name
@@ -543,16 +525,9 @@ class OctetStreamParser:
             self.on_start()
             self._started = True
 
-        # Truncate data length.
-        data_len = len(data)
-        if (self._current_size + data_len) > self.max_size:
-            # We truncate the length of data that we are to process.
-            new_size = int(self.max_size - self._current_size)
-            logger.warning("Current size is %d (max %d), so truncating "
-                                "data length from %d to %d",
-                                self._current_size, self.max_size, data_len,
-                                new_size)
-            data_len = new_size
+        data_len = get_data_len(self._current_size,
+                                self.max_size,
+                                len(data))
 
         # Increment size, then callback, in case there's an exception.
         self._current_size += data_len
@@ -602,8 +577,7 @@ def query_string_parser_internal_write(
                         e.offset = i
                         raise e
                     else:
-                        logger.debug(
-                            f"Skipping duplicate ampersand/semicolon at {i}")
+                        pass
                 else:
                     # This case is when we're skipping the (first)
                     # seperator between fields, so we just set our flag
@@ -705,9 +679,7 @@ def query_string_parser_internal_write(
                 i = length
 
         else:
-            msg = "Reached an unknown state %d at %d" % (state, i)
-            logger.warning(msg)
-            e = QuerystringParseError(msg)
+            e = QuerystringParseError(f"Reached an unknown state {state} at {i}")
             e.offset = i
             raise e
 
@@ -795,15 +767,9 @@ class QuerystringParser:
         the input data chunk (NOT the overall stream) that caused the error.
         """
         # Handle sizing.
-        data_len = len(data)
-        if (self._current_size + data_len) > self.max_size:
-            # We truncate the length of data that we are to process.
-            new_size = int(self.max_size - self._current_size)
-            logger.warning("Current size is %d (max %d), so truncating "
-                                "data length from %d to %d",
-                                self._current_size, self.max_size, data_len,
-                                new_size)
-            data_len = new_size
+        data_len = get_data_len(self._current_size,
+                                self.max_size,
+                                len(data))
 
         length: int = 0
 
@@ -834,6 +800,20 @@ class QuerystringParser:
         if self.state == STATE_FIELD_DATA:
             self.on_field_end()
         self.on_end()
+
+
+def get_data_len(current_size: int,
+                 max_size: int,
+                 data_len: int) -> int:
+    if (current_size + data_len) > max_size:
+        # We truncate the length of data that we are to process.
+        new_size = int(max_size - current_size)
+        warn(f"Current size is {current_size} (max {max_size}), "
+             f"so truncating data length from {data_len} to {new_size}")
+
+        return new_size
+    else:
+        return data_len
 
 
 class MultipartParser:
@@ -953,15 +933,9 @@ class MultipartParser:
 
         :param data: a bytestring
         """
-        # Handle sizing.
-        data_len = len(data)
-        if (self._current_size + data_len) > self.max_size:
-            # We truncate the length of data that we are to process.
-            new_size = int(self.max_size - self._current_size)
-            logger.warning("Current size is %d (max %d), so truncating "
-                           "data length from %d to %d",
-                           self._current_size, self.max_size, data_len, new_size)
-            data_len = new_size
+        data_len = get_data_len(self._current_size,
+                                self.max_size,
+                                len(data))
 
         length: int = 0
         try:
@@ -1023,7 +997,6 @@ class MultipartParser:
                 # Skip leading newlines
                 if c == CR or c == LF:
                     i += 1
-                    logger.debug("Skipping leading CR/LF at %d", i)
                     continue
 
                 # index is used as in index into our boundary.  Set to 0.
@@ -1041,7 +1014,7 @@ class MultipartParser:
                     if c != CR:
                         # Error!
                         msg = "Did not find CR at end of boundary (%d)" % (i,)
-                        logger.warning(msg)
+                        warn(msg)
                         e = MultipartParseError(msg)
                         e.offset = i
                         raise e
@@ -1050,9 +1023,8 @@ class MultipartParser:
 
                 elif index == len(boundary) - 2 + 1:
                     if c != LF:
-                        msg = "Did not find LF at end of boundary (%d)" % (i,)
-                        logger.warning(msg)
-                        e = MultipartParseError(msg)
+                        e = MultipartParseError(
+                            f"Did not find LF at end of boundary ({i})")
                         e.offset = i
                         raise e
 
@@ -1068,10 +1040,9 @@ class MultipartParser:
                 else:
                     # Check to ensure our boundary matches
                     if c != boundary[index + 2]:
-                        msg = "Did not find boundary character %r at index " \
-                              "%d" % (c, index + 2)
-                        logger.warning(msg)
-                        e = MultipartParseError(msg)
+                        e = MultipartParseError(
+                            f"Did not find boundary character {c} at "
+                            f"index {index + 2}")
                         e.offset = i
                         raise e
 
@@ -1112,7 +1083,6 @@ class MultipartParser:
                     # A 0-length header is an error.
                     if index == 1:
                         msg = "Found 0-length header at %d" % (i,)
-                        logger.warning(msg)
                         e = MultipartParseError(msg)
                         e.offset = i
                         raise e
@@ -1128,10 +1098,8 @@ class MultipartParser:
                     # a valid letter.  If not, it's an error.
                     cl = lower_char(c)
                     if cl < LOWER_A or cl > LOWER_Z:
-                        msg = "Found non-alphanumeric character %r in " \
-                              "header at %d" % (c, i)
-                        logger.warning(msg)
-                        e = MultipartParseError(msg)
+                        e = MultipartParseError(
+                            f"Found non-alphanumeric character {c} in header at {i}")
                         e.offset = i
                         raise e
 
@@ -1159,10 +1127,8 @@ class MultipartParser:
             elif state == STATE_HEADER_VALUE_ALMOST_DONE:
                 # The last character should be a LF.  If not, it's an error.
                 if c != LF:
-                    msg = "Did not find LF character at end of header " \
-                          "(found %r)" % (c,)
-                    logger.warning(msg)
-                    e = MultipartParseError(msg)
+                    e = MultipartParseError(
+                        f"Did not find LF character at end of header (found {c})")
                     e.offset = i
                     raise e
 
@@ -1176,9 +1142,9 @@ class MultipartParser:
                 # a CR at the beginning of a header, so our next character
                 # should be a LF, or it's an error.
                 if c != LF:
-                    msg = "Did not find LF at end of headers (found %r)" % (c,)
-                    logger.warning(msg)
-                    e = MultipartParseError(msg)
+                    e = MultipartParseError(
+                        "Did not find LF at end of headers (found %r)" % (c,)
+                    )
                     e.offset = i
                     raise e
 
@@ -1329,14 +1295,12 @@ class MultipartParser:
             elif state == STATE_END:
                 # Do nothing and just consume a byte in the end state.
                 if c not in (CR, LF):
-                    logger.warning("Consuming a byte '0x%x' in the end state",
-                                        c)
+                    warn("Consuming a byte '0x%x' in the end state" % c)
 
             else:                   # pragma: no cover (error case)
                 # We got into a strange state somehow!  Just stop processing.
-                msg = "Reached an unknown state %d at %d" % (state, i)
-                logger.warning(msg)
-                e = MultipartParseError(msg)
+                e = MultipartParseError(
+                    "Reached an unknown state %d at %d" % (state, i))
                 e.offset = i
                 raise e
 
@@ -1553,7 +1517,6 @@ class FormParser(object):
 
         elif content_type == 'multipart/form-data':
             if boundary is None:
-                logger.error("No boundary given")
                 raise FormParserError("No boundary given")
 
             header_name = []
@@ -1636,14 +1599,10 @@ class FormParser(object):
                     writer = QuotedPrintableDecoder(f)
 
                 else:
-                    logger.warning("Unknown Content-Transfer-Encoding: "
-                                        "%r", transfer_encoding)
                     if self.config['UPLOAD_ERROR_ON_BAD_CTE']:
                         raise FormParserError(
                             'Unknown Content-Transfer-Encoding "{0}"'.format(
-                                transfer_encoding
-                            )
-                        )
+                                transfer_encoding))
                     else:
                         # If we aren't erroring, then we just treat this as an
                         # unencoded Content-Transfer-Encoding.
@@ -1668,7 +1627,6 @@ class FormParser(object):
                                           on_end=on_end)
 
         else:
-            logger.warning("Unknown Content-Type: %r", content_type)
             raise FormParserError("Unknown Content-Type: {0}".format(
                 content_type
             ))
@@ -1712,7 +1670,6 @@ def create_form_parser(headers,
     """
     content_type = headers.get('Content-Type')
     if content_type is None:
-        logging.getLogger(__name__).warning("No Content-Type header given")
         raise ValueError("No Content-Type header given!")
 
     # Boundaries are optional (the FormParser will raise if one is needed

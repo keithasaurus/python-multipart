@@ -7,3 +7,4 @@ pytest-cov==2.6.0
 PyYAML==3.13
 radon==2.4.0
 tox==3.5.2
+typing-extensions==3.6.6
