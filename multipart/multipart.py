@@ -7,7 +7,7 @@ from multipart.exceptions import (
     QuerystringParseError
 )
 from numbers import Number
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, Protocol
 
 import logging
 import os
@@ -92,6 +92,8 @@ OPTION_RE_STR = (
 )
 OPTION_RE = re.compile(OPTION_RE_STR)
 QUOTE = b'"'[0]
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_options_header_bytes(value: bytes) -> Tuple[bytes, Dict]:
@@ -309,7 +311,6 @@ class File(object):
     """
     def __init__(self, file_name, field_name=None, config=None):
         # Save configuration, set other variables default.
-        self.logger = logging.getLogger(__name__)
         self._config = empty_dict_if_none(config)
         self.in_memory = True
         self.size = 0
@@ -338,7 +339,7 @@ class File(object):
         warning will be logged to this module's logger.
         """
         if not self.in_memory:
-            self.logger.warning(
+            logger.warning(
                 "Trying to flush to disk when we're not in memory"
             )
             return
@@ -368,7 +369,7 @@ class File(object):
     def _get_disk_file(self):
         """This function is responsible for getting a file object on-disk for us.
         """
-        self.logger.info("Opening a file on disk")
+        logger.info("Opening a file on disk")
 
         file_dir = self._config.get('UPLOAD_DIR')
         keep_filename = self._config.get('UPLOAD_KEEP_FILENAME', False)
@@ -377,7 +378,7 @@ class File(object):
 
         # If we have a directory and are to keep the filename...
         if file_dir is not None and keep_filename:
-            self.logger.info("Saving with filename in: %r", file_dir)
+            logger.info("Saving with filename in: %r", file_dir)
 
             # Build our filename.
             # TODO: what happens if we don't have a filename?
@@ -387,11 +388,11 @@ class File(object):
 
             path = os.path.join(file_dir, fname)
             try:
-                self.logger.info("Opening file: %r", path)
+                logger.info("Opening file: %r", path)
                 tmp_file = open(path, 'w+b')
             except (IOError, OSError) as e:
 
-                self.logger.exception("Error opening temporary file")
+                logger.exception("Error opening temporary file")
                 raise FileError("Error opening temporary file: %r" % path)
         else:
             tmp_file, fname = get_temp_file_details(file_dir,
@@ -420,7 +421,7 @@ class File(object):
 
         # If the bytes written isn't the same as the length, just return.
         if bwritten != len(data):
-            self.logger.warning("bwritten != len(data) (%d != %d)", bwritten,
+            logger.warning("bwritten != len(data) (%d != %d)", bwritten,
                                 len(data))
             return bwritten
 
@@ -432,7 +433,7 @@ class File(object):
                 self._config.get('MAX_MEMORY_FILE_SIZE') is not None and
                 (self.size >
                  self._config.get('MAX_MEMORY_FILE_SIZE'))):
-            self.logger.info("Flushing to disk")
+            logger.info("Flushing to disk")
             self.flush_to_disk()
 
         # Return the number of bytes written.
@@ -474,12 +475,12 @@ def get_temp_file_details(
         options['dir'] = str_or_decode_bytes_system(file_dir)
 
     # Create a temporary (named) file with the appropriate settings.
-    f.logger.info("Creating a temporary file with options: %r", options)
+    logger.info("Creating a temporary file with options: %r", options)
 
     try:
         tmp_file = tempfile.NamedTemporaryFile(**options)
     except (IOError, OSError):
-        f.logger.exception("Error creating named temporary file")
+        logger.exception("Error creating named temporary file")
         raise FileError("Error creating named temporary file")
     else:
         fname: Union[str, bytes] = tmp_file.name
@@ -489,21 +490,12 @@ def get_temp_file_details(
                           else fname)
 
 
-class BaseParser(object):
-    def __init__(self) -> None:
-        self.logger: logging.Logger = logging.getLogger(__name__)
-
-    def close(self):
-        pass
-
-    def finalize(self):
-        pass
-
+class Writeable(Protocol):
     def write(self, data: bytes) -> int:
-        raise NotImplementedError
+        ...
 
 
-class OctetStreamParser(BaseParser):
+class OctetStreamParser:
     """This parser parses an octet-stream request body and calls callbacks when
     incoming data is received.  Callbacks are as follows:
 
@@ -532,8 +524,6 @@ class OctetStreamParser(BaseParser):
                  on_start: Callable[[], None]=always_none,
                  on_data: Callable[[bytes, int, int], None]=always_none,
                  on_end: Callable[[], None]=always_none) -> None:
-        super().__init__()
-
         self._started = False
         self.on_start = on_start
         self.on_end = on_end
@@ -558,7 +548,7 @@ class OctetStreamParser(BaseParser):
         if (self._current_size + data_len) > self.max_size:
             # We truncate the length of data that we are to process.
             new_size = int(self.max_size - self._current_size)
-            self.logger.warning("Current size is %d (max %d), so truncating "
+            logger.warning("Current size is %d (max %d), so truncating "
                                 "data length from %d to %d",
                                 self._current_size, self.max_size, data_len,
                                 new_size)
@@ -577,7 +567,6 @@ class OctetStreamParser(BaseParser):
 
 
 def query_string_parser_internal_write(
-        logger: logging.Logger,
         state: int,
         strict_parsing: bool,
         found_sep: bool,
@@ -727,7 +716,7 @@ def query_string_parser_internal_write(
     return state, found_sep
 
 
-class QuerystringParser(BaseParser):
+class QuerystringParser:
     """This is a streaming querystring parser.  It will consume data, and call
     the callbacks given when it has data.
 
@@ -778,7 +767,7 @@ class QuerystringParser(BaseParser):
                  on_field_data: Callable[[bytes, int, int], None]=always_none,
                  on_end: Callable[[], None]=always_none
                  ) -> None:
-        super().__init__()
+
         self.state = STATE_BEFORE_FIELD
 
         # Max-size stuff
@@ -810,7 +799,7 @@ class QuerystringParser(BaseParser):
         if (self._current_size + data_len) > self.max_size:
             # We truncate the length of data that we are to process.
             new_size = int(self.max_size - self._current_size)
-            self.logger.warning("Current size is %d (max %d), so truncating "
+            logger.warning("Current size is %d (max %d), so truncating "
                                 "data length from %d to %d",
                                 self._current_size, self.max_size, data_len,
                                 new_size)
@@ -820,7 +809,6 @@ class QuerystringParser(BaseParser):
 
         try:
             self.state, self._found_sep = query_string_parser_internal_write(
-                self.logger,
                 self.state,
                 self.strict_parsing,
                 self._found_sep,
@@ -848,7 +836,7 @@ class QuerystringParser(BaseParser):
         self.on_end()
 
 
-class MultipartParser(BaseParser):
+class MultipartParser:
     """This class is a streaming multipart/form-data parser.
 
     .. list-table::
@@ -970,10 +958,9 @@ class MultipartParser(BaseParser):
         if (self._current_size + data_len) > self.max_size:
             # We truncate the length of data that we are to process.
             new_size = int(self.max_size - self._current_size)
-            self.logger.warning("Current size is %d (max %d), so truncating "
-                                "data length from %d to %d",
-                                self._current_size, self.max_size, data_len,
-                                new_size)
+            logger.warning("Current size is %d (max %d), so truncating "
+                           "data length from %d to %d",
+                           self._current_size, self.max_size, data_len, new_size)
             data_len = new_size
 
         length: int = 0
@@ -1036,7 +1023,7 @@ class MultipartParser(BaseParser):
                 # Skip leading newlines
                 if c == CR or c == LF:
                     i += 1
-                    self.logger.debug("Skipping leading CR/LF at %d", i)
+                    logger.debug("Skipping leading CR/LF at %d", i)
                     continue
 
                 # index is used as in index into our boundary.  Set to 0.
@@ -1054,7 +1041,7 @@ class MultipartParser(BaseParser):
                     if c != CR:
                         # Error!
                         msg = "Did not find CR at end of boundary (%d)" % (i,)
-                        self.logger.warning(msg)
+                        logger.warning(msg)
                         e = MultipartParseError(msg)
                         e.offset = i
                         raise e
@@ -1064,7 +1051,7 @@ class MultipartParser(BaseParser):
                 elif index == len(boundary) - 2 + 1:
                     if c != LF:
                         msg = "Did not find LF at end of boundary (%d)" % (i,)
-                        self.logger.warning(msg)
+                        logger.warning(msg)
                         e = MultipartParseError(msg)
                         e.offset = i
                         raise e
@@ -1083,7 +1070,7 @@ class MultipartParser(BaseParser):
                     if c != boundary[index + 2]:
                         msg = "Did not find boundary character %r at index " \
                               "%d" % (c, index + 2)
-                        self.logger.warning(msg)
+                        logger.warning(msg)
                         e = MultipartParseError(msg)
                         e.offset = i
                         raise e
@@ -1125,7 +1112,7 @@ class MultipartParser(BaseParser):
                     # A 0-length header is an error.
                     if index == 1:
                         msg = "Found 0-length header at %d" % (i,)
-                        self.logger.warning(msg)
+                        logger.warning(msg)
                         e = MultipartParseError(msg)
                         e.offset = i
                         raise e
@@ -1143,7 +1130,7 @@ class MultipartParser(BaseParser):
                     if cl < LOWER_A or cl > LOWER_Z:
                         msg = "Found non-alphanumeric character %r in " \
                               "header at %d" % (c, i)
-                        self.logger.warning(msg)
+                        logger.warning(msg)
                         e = MultipartParseError(msg)
                         e.offset = i
                         raise e
@@ -1174,7 +1161,7 @@ class MultipartParser(BaseParser):
                 if c != LF:
                     msg = "Did not find LF character at end of header " \
                           "(found %r)" % (c,)
-                    self.logger.warning(msg)
+                    logger.warning(msg)
                     e = MultipartParseError(msg)
                     e.offset = i
                     raise e
@@ -1190,7 +1177,7 @@ class MultipartParser(BaseParser):
                 # should be a LF, or it's an error.
                 if c != LF:
                     msg = "Did not find LF at end of headers (found %r)" % (c,)
-                    self.logger.warning(msg)
+                    logger.warning(msg)
                     e = MultipartParseError(msg)
                     e.offset = i
                     raise e
@@ -1342,13 +1329,13 @@ class MultipartParser(BaseParser):
             elif state == STATE_END:
                 # Do nothing and just consume a byte in the end state.
                 if c not in (CR, LF):
-                    self.logger.warning("Consuming a byte '0x%x' in the end state",
+                    logger.warning("Consuming a byte '0x%x' in the end state",
                                         c)
 
             else:                   # pragma: no cover (error case)
                 # We got into a strange state somehow!  Just stop processing.
                 msg = "Reached an unknown state %d at %d" % (state, i)
-                self.logger.warning(msg)
+                logger.warning(msg)
                 e = MultipartParseError(msg)
                 e.offset = i
                 raise e
@@ -1464,9 +1451,6 @@ class FormParser(object):
                  file_class=File,
                  field_class=Field,
                  config=None) -> None:
-
-        self.logger = logging.getLogger(__name__)
-
         # Save variables.
         self.content_type = content_type
         self.boundary = boundary
@@ -1513,7 +1497,7 @@ class FormParser(object):
                 if self.on_end is not None:
                     self.on_end()
 
-            self.parser: BaseParser = OctetStreamParser(
+            self.parser: Writeable = OctetStreamParser(
                 max_size=max_body_size,
                 on_start=on_start,
                 on_data=on_data,
@@ -1569,7 +1553,7 @@ class FormParser(object):
 
         elif content_type == 'multipart/form-data':
             if boundary is None:
-                self.logger.error("No boundary given")
+                logger.error("No boundary given")
                 raise FormParserError("No boundary given")
 
             header_name = []
@@ -1652,7 +1636,7 @@ class FormParser(object):
                     writer = QuotedPrintableDecoder(f)
 
                 else:
-                    self.logger.warning("Unknown Content-Transfer-Encoding: "
+                    logger.warning("Unknown Content-Transfer-Encoding: "
                                         "%r", transfer_encoding)
                     if self.config['UPLOAD_ERROR_ON_BAD_CTE']:
                         raise FormParserError(
@@ -1684,7 +1668,7 @@ class FormParser(object):
                                           on_end=on_end)
 
         else:
-            self.logger.warning("Unknown Content-Type: %r", content_type)
+            logger.warning("Unknown Content-Type: %r", content_type)
             raise FormParserError("Unknown Content-Type: {0}".format(
                 content_type
             ))

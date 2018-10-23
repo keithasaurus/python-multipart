@@ -76,9 +76,6 @@ class Base64Decoder(object):
         return len(data)
 
     def close(self) -> None:
-        """Close this decoder.  If the underlying object has a `close()`
-        method, this function will call it.
-        """
         if hasattr(self.underlying, 'close'):
             self.underlying.close()
 

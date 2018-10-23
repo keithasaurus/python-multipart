@@ -4,5 +4,6 @@ flake8-mutable==1.2.0
 mypy==0.630
 pytest==3.9.1
 pytest-cov==2.6.0
+PyYAML==3.13
 radon==2.4.0
 tox==3.5.2
