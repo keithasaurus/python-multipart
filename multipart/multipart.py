@@ -1646,8 +1646,8 @@ class FormParser(object):
 
 
 def create_form_parser(headers,
-                       on_field: Callable,
-                       on_file: Callable,
+                       on_field: Callable[[Any], None],
+                       on_file: Callable[[Any], None],
                        config: Dict[str, Any]=None):
     """This function is a helper function to aid in creating a FormParser
     instances.  Given a dictionary-like headers object, it will determine
@@ -1693,8 +1693,8 @@ def create_form_parser(headers,
 
 def parse_form(headers,
                input_stream,
-               on_field: Callable,
-               on_file: Callable) -> None:
+               on_field: Callable[[Any], None],
+               on_file: Callable[[Any], None]) -> None:
     """This function is useful if you just want to parse a request body,
     without too much work.  Pass it a dictionary-like object of the request's
     headers, and a file-like object for the input stream, along with two
