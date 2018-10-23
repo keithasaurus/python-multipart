@@ -172,36 +172,29 @@ class Field(object):
         return f
 
     def write(self, data: bytes) -> int:
-        """Write some data into the form field.
-
-        :param data: a bytestring
-        """
+        """Write some data into the form field. """
         return self.on_data(data)
 
-    def on_data(self, data) -> int:
-        """This method is a callback that will be called whenever data is
+    def on_data(self, data: bytes) -> int:
+        """
+        This method is a callback that will be called whenever data is
         written to the Field.
-
-        :param data: a bytestring
         """
         self._value.append(data)
         self._cache = _missing
         return len(data)
 
     def on_end(self) -> None:
-        """This method is called whenever the Field is finalized.
-        """
+        """This method is called whenever the Field is finalized."""
         if self._cache is _missing:
             self._cache = b''.join(self._value)
 
     def finalize(self) -> None:
-        """Finalize the form field.
-        """
+        """Finalize the form field."""
         self.on_end()
 
     def close(self) -> None:
-        """Close the Field object.  This will free any underlying cache.
-        """
+        """Close the Field object.  This will free any underlying cache. """
         # Free our value array.
         if self._cache is _missing:
             self._cache = b''.join(self._value)
@@ -209,7 +202,8 @@ class Field(object):
         del self._value
 
     def set_none(self) -> None:
-        """Some fields in a querystring can possibly have a value of None - for
+        """
+        Some fields in a querystring can possibly have a value of None - for
         example, the string "foo&bar=&baz=asdf" will have a field with the
         name "foo" and value None, one with name "bar" and value "", and one
         with name "baz" and value "asdf".  Since the write() interface doesn't
@@ -250,7 +244,8 @@ def str_or_decode_bytes_system(str_or_bytes: Union[str, bytes]) -> str:
 
 
 class File(object):
-    """This class represents an uploaded file.  It handles writing file data to
+    """
+    This class represents an uploaded file.  It handles writing file data to
     either an in-memory file or a temporary file on-disk, if the optional
     threshold is passed.
 
@@ -330,7 +325,8 @@ class File(object):
             self._ext: Union[str, bytes] = ext
 
     def flush_to_disk(self):
-        """If the file is already on-disk, do nothing.  Otherwise, copy from
+        """
+        If the file is already on-disk, do nothing.  Otherwise, copy from
         the in-memory buffer to a disk file, and then reassign our internal
         file object to this new disk file.
 
@@ -396,11 +392,10 @@ class File(object):
         """ Write some data to the File. """
         return self.on_data(data)
 
-    def on_data(self, data) -> int:
-        """This method is a callback that will be called whenever data is
+    def on_data(self, data: bytes) -> int:
+        """
+        This method is a callback that will be called whenever data is
         written to the File.
-
-        :param data: a bytestring
         """
         pos = self.file_object.tell()
         bwritten = self.file_object.write(data)
@@ -930,8 +925,6 @@ class MultipartParser:
         is encountered, a MultipartParseError will be raised.  The "offset"
         attribute on the raised exception will be set to the offset of the byte
         in the input chunk that caused the error.
-
-        :param data: a bytestring
         """
         data_len = get_data_len(self._current_size,
                                 self.max_size,
@@ -1361,7 +1354,7 @@ class FormParser(object):
 
     :param boundary: If the request is a multipart/form-data request, this
                      should be the boundary of the request, as given in the
-                     Content-Type header, as a bytestring.
+                     Content-Type header.
 
     :param file_name: If the request is of type application/octet-stream, then
                       the body of the request will not contain any information
@@ -1410,7 +1403,7 @@ class FormParser(object):
                  on_field,
                  on_file,
                  on_end=None,
-                 boundary=None,
+                 boundary: Optional[bytes] = None,
                  file_name=None,
                  file_class=File,
                  field_class=Field,
@@ -1708,7 +1701,7 @@ def parse_form(headers,
                     required header is Content-Type.
 
     :param input_stream: A file-like object that represents the request body.
-                         The read() method must return bytestrings.
+                         The read() method must return.
 
     :param on_field: Callback to call with each parsed field.
 
