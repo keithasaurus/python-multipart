@@ -296,8 +296,7 @@ class File(object):
            default, the contents of a File are kept into memory until a certain
            limit is reached, after which the contents of the File are written
            to a temporary file.  This behavior can be disabled by setting this
-           value to an appropriately large value (or, for example, infinity,
-           such as `float('inf')`.
+           value to an appropriately large value.
 
     :param file_name: The name of the file that this :class:`File` represents
 
@@ -339,30 +338,29 @@ class File(object):
         warning will be logged to this module's logger.
         """
         if not self.in_memory:
-            warn("Trying to flush to disk when we're not in memory")
-            return
+            return None
+        else:
+            # Go back to the start of our file.
+            self.file_object.seek(0)
 
-        # Go back to the start of our file.
-        self.file_object.seek(0)
+            # Open a new file.
+            new_file = self._get_disk_file()
 
-        # Open a new file.
-        new_file = self._get_disk_file()
+            # Copy the file objects.
+            shutil.copyfileobj(self.file_object, new_file)
 
-        # Copy the file objects.
-        shutil.copyfileobj(self.file_object, new_file)
+            # Seek to the new position in our new file.
+            new_file.seek(self.size)
 
-        # Seek to the new position in our new file.
-        new_file.seek(self.size)
+            # Reassign the fileobject.
+            old_fileobj = self.file_object
+            self.file_object = new_file
 
-        # Reassign the fileobject.
-        old_fileobj = self.file_object
-        self.file_object = new_file
+            # We're no longer in memory.
+            self.in_memory = False
 
-        # We're no longer in memory.
-        self.in_memory = False
-
-        # Close the old file object.
-        old_fileobj.close()
+            # Close the old file object.
+            old_fileobj.close()
 
     def _get_disk_file(self):
         """This function is responsible for getting a file object on-disk for us."""
@@ -521,7 +519,8 @@ class OctetStreamParser:
         self._current_size: int = 0
 
     def write(self, data: bytes) -> int:
-        """Write some data to the parser, which will perform size verification,
+        """
+        Write some data to the parser, which will perform size verification,
         and then pass the data to the underlying callback.
         """
         if not self._started:
@@ -538,7 +537,8 @@ class OctetStreamParser:
         return data_len
 
     def finalize(self) -> None:
-        """Finalize this parser, which signals to that we are finished parsing,
+        """
+        Finalize this parser, which signals to that we are finished parsing,
         and sends the on_end callback.
         """
         self.on_end()
@@ -768,7 +768,6 @@ class QuerystringParser:
         "offset" attribute of the raised exception will be set to the offset in
         the input data chunk (NOT the overall stream) that caused the error.
         """
-        # Handle sizing.
         data_len = get_data_len(self._current_size,
                                 self.max_size,
                                 len(data))
@@ -809,11 +808,7 @@ def get_data_len(current_size: int,
                  data_len: int) -> int:
     if (current_size + data_len) > max_size:
         # We truncate the length of data that we are to process.
-        new_size = int(max_size - current_size)
-        warn(f"Current size is {current_size} (max {max_size}), "
-             f"so truncating data length from {data_len} to {new_size}")
-
-        return new_size
+        return int(max_size - current_size)
     else:
         return data_len
 
@@ -892,7 +887,7 @@ class MultipartParser:
         self.max_size: int = max_size
         self._current_size: int = 0
         self.on_part_begin: CallbackNoArgs = on_part_begin
-        self.on_part_data: CallbackData= on_part_data
+        self.on_part_data: CallbackData = on_part_data
         self.on_part_end: CallbackNoArgs = on_part_end
         self.on_header_field: CallbackData = on_header_field
         self.on_header_value: CallbackData = on_header_value
@@ -1012,10 +1007,8 @@ class MultipartParser:
                 # are CRLF.
                 if index == len(boundary) - 2:
                     if c != CR:
-                        # Error!
-                        msg = "Did not find CR at end of boundary (%d)" % (i,)
-                        warn(msg)
-                        e = MultipartParseError(msg)
+                        e = MultipartParseError(
+                            f"Did not find CR at end of boundary ({i})")
                         e.offset = i
                         raise e
 
@@ -1504,7 +1497,7 @@ class FormParser(object):
             def on_end() -> None:
                 if self.on_end is not None:
                     self.on_end()
- 
+
             # Instantiate parser.
             self.parser = QuerystringParser(
                 max_size=max_body_size,
@@ -1720,7 +1713,7 @@ def parse_form(headers,
     if content_length is not None:
         content_length = int(content_length)
     else:
-        content_length = float('inf')
+        content_length = MAX_INT
     bytes_read = 0
 
     while True:
