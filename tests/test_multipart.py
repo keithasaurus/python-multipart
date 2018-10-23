@@ -1090,17 +1090,6 @@ class TestFormParser(unittest.TestCase):
         self.assertTrue(isinstance(f.parser, QuerystringParser))
         simple_test(f)
 
-    def test_close_methods(self):
-        parser = Mock()
-        f = FormParser('application/x-url-encoded', None, None)
-        f.parser = parser
-
-        f.finalize()
-        parser.finalize.assert_called_once_with()
-
-        f.close()
-        parser.close.assert_called_once_with()
-
     def test_bad_content_type(self):
         # We should raise a ValueError for a bad Content-Type
         with self.assertRaises(ValueError):

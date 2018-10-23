@@ -35,7 +35,7 @@ class Base64Decoder(object):
     """
 
     def __init__(self, underlying: Any) -> None:
-        self.cache = bytearray()
+        self.cache = b""
         self.underlying = underlying
 
     def write(self, data) -> int:

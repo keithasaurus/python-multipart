@@ -94,6 +94,9 @@ OPTION_RE_STR = (
 OPTION_RE = re.compile(OPTION_RE_STR)
 QUOTE = b'"'[0]
 
+CallbackNoArgs = Callable[[], None]
+CallbackData = Callable[[bytes, int, int], None]
+
 
 def _parse_options_header_bytes(value: bytes) -> Tuple[bytes, Dict]:
     if b';' not in value:
@@ -130,7 +133,11 @@ def parse_options_header(value: Union[None, str, bytes]) -> Tuple[bytes, Dict]:
     )
 
 
-def always_none(*args, **kwargs) -> None:
+def always_none() -> None:
+    return None
+
+
+def always_none_with_data(d: bytes, i: int, l: int) -> None:
     return None
 
 
@@ -146,8 +153,6 @@ class Field(object):
     This class defines two methods, :meth:`on_data` and :meth:`on_end`, that
     will be called when data is written to the Field, and when the Field is
     finalized, respectively.
-
-    :param name: the name of the form field
     """
     def __init__(self, field_name):
         self.field_name = field_name
@@ -471,6 +476,9 @@ class Writeable(Protocol):
     def write(self, data: bytes) -> int:
         ...
 
+    def finalize(self) -> None:
+        ...
+
 
 class OctetStreamParser:
     """This parser parses an octet-stream request body and calls callbacks when
@@ -498,9 +506,9 @@ class OctetStreamParser:
     """
     def __init__(self,
                  max_size: int=MAX_INT,
-                 on_start: Callable[[], None]=always_none,
-                 on_data: Callable[[bytes, int, int], None]=always_none,
-                 on_end: Callable[[], None]=always_none) -> None:
+                 on_start: CallbackNoArgs=always_none,
+                 on_data: CallbackData=always_none_with_data,
+                 on_end: CallbackNoArgs=always_none) -> None:
         self._started = False
         self.on_start = on_start
         self.on_end = on_end
@@ -536,17 +544,16 @@ class OctetStreamParser:
         self.on_end()
 
 
-def query_string_parser_internal_write(
-        state: int,
-        strict_parsing: bool,
-        found_sep: bool,
-        data: bytes,
-        length: int,
-        on_field_start: Callable[[], None],
-        on_field_end: Callable[[], None],
-        on_field_name: Callable[[bytes, int, int], None],
-        on_field_data: Callable[[bytes, int, int], None]
-) -> Tuple[int, bool]:
+def query_string_parser_internal_write(state: int,
+                                       strict_parsing: bool,
+                                       found_sep: bool,
+                                       data: bytes,
+                                       length: int,
+                                       on_field_start: CallbackNoArgs,
+                                       on_field_end: CallbackNoArgs,
+                                       on_field_name: CallbackData,
+                                       on_field_data: CallbackData
+                                       ) -> Tuple[int, bool]:
     strict_parsing = strict_parsing
 
     i = 0
@@ -725,15 +732,15 @@ class QuerystringParser:
     :param max_size: The maximum size of body to parse.  Defaults to infinity -
                      i.e. unbounded.
     """
+
     def __init__(self,
-                 strict_parsing: bool=False,
-                 max_size: int=MAX_INT,
-                 on_field_start: Callable[[], None]=always_none,
-                 on_field_end: Callable[[], None]=always_none,
-                 on_field_name: Callable[[bytes, int, int], None]=always_none,
-                 on_field_data: Callable[[bytes, int, int], None]=always_none,
-                 on_end: Callable[[], None]=always_none
-                 ) -> None:
+                 strict_parsing: bool = False,
+                 max_size: int = MAX_INT,
+                 on_field_start: CallbackNoArgs = always_none,
+                 on_field_end: CallbackNoArgs = always_none,
+                 on_field_name: CallbackData = always_none_with_data,
+                 on_field_data: CallbackData = always_none_with_data,
+                 on_end: CallbackNoArgs = always_none) -> None:
 
         self.state = STATE_BEFORE_FIELD
 
@@ -744,11 +751,11 @@ class QuerystringParser:
         self.max_size: int = max_size
         self._current_size: int = 0
         self._found_sep: bool = False
-        self.on_field_start = on_field_start
-        self.on_field_end = on_field_end
-        self.on_field_name = on_field_name
-        self.on_field_data = on_field_data
-        self.on_end = on_end
+        self.on_field_start: CallbackNoArgs = on_field_start
+        self.on_field_end: CallbackNoArgs = on_field_end
+        self.on_field_name: CallbackData = on_field_name
+        self.on_field_data: CallbackData = on_field_data
+        self.on_end: CallbackNoArgs = on_end
 
         # Should parsing be strict?
         self.strict_parsing: bool = strict_parsing
@@ -866,14 +873,14 @@ class MultipartParser:
     def __init__(self,
                  boundary: Union[str, bytes],
                  max_size: int=MAX_INT,
-                 on_part_begin: Callable=always_none,
-                 on_part_data: Callable=always_none,
-                 on_part_end: Callable=always_none,
-                 on_header_field: Callable=always_none,
-                 on_header_value: Callable=always_none,
-                 on_header_end: Callable=always_none,
-                 on_headers_finished: Callable=always_none,
-                 on_end: Callable=always_none
+                 on_part_begin: CallbackNoArgs=always_none,
+                 on_part_data: CallbackData=always_none_with_data,
+                 on_part_end: CallbackNoArgs=always_none,
+                 on_header_field: CallbackData=always_none_with_data,
+                 on_header_value: CallbackData=always_none_with_data,
+                 on_header_end: CallbackNoArgs=always_none,
+                 on_headers_finished: CallbackNoArgs=always_none,
+                 on_end: CallbackNoArgs=always_none
                  ) -> None:
         super().__init__()
         self.state = STATE_START
@@ -884,14 +891,14 @@ class MultipartParser:
                              max_size)
         self.max_size: int = max_size
         self._current_size: int = 0
-        self.on_part_begin = on_part_begin
-        self.on_part_data = on_part_data
-        self.on_part_end = on_part_end
-        self.on_header_field = on_header_field
-        self.on_header_value = on_header_value
-        self.on_header_end = on_header_end
-        self.on_headers_finished = on_headers_finished
-        self.on_end = on_end
+        self.on_part_begin: CallbackNoArgs = on_part_begin
+        self.on_part_data: CallbackData= on_part_data
+        self.on_part_end: CallbackNoArgs = on_part_end
+        self.on_header_field: CallbackData = on_header_field
+        self.on_header_value: CallbackData = on_header_value
+        self.on_header_end: CallbackNoArgs = on_header_end
+        self.on_headers_finished: CallbackNoArgs = on_headers_finished
+        self.on_end: CallbackNoArgs = on_end
 
         # Setup marks.  These are used to track the state of data recieved.
         self.marks = {}
@@ -1636,10 +1643,6 @@ class FormParser(object):
     def finalize(self) -> None:
         if self.parser is not None and hasattr(self.parser, 'finalize'):
             self.parser.finalize()
-
-    def close(self) -> None:
-        if self.parser is not None and hasattr(self.parser, 'close'):
-            self.parser.close()
 
 
 def create_form_parser(headers,
