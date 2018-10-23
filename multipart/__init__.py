@@ -9,7 +9,6 @@ __copyright__ = "Copyright (c) 2012-2013, Andrew Dunham"
 from ._version import __version__  # noqa: F401
 
 from .multipart import (  # noqa: F401
-    FormParser,
     MultipartParser,
     QuerystringParser,
     OctetStreamParser,

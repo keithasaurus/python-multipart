@@ -133,11 +133,7 @@ def parse_options_header(value: Union[None, str, bytes]) -> Tuple[bytes, Dict]:
     )
 
 
-def always_none() -> None:
-    return None
-
-
-def always_none_with_data(d: bytes, i: int, l: int) -> None:
+def always_none(*args, **kwargs) -> None:
     return None
 
 
@@ -505,7 +501,7 @@ class OctetStreamParser:
     def __init__(self,
                  max_size: int=MAX_INT,
                  on_start: CallbackNoArgs=always_none,
-                 on_data: CallbackData=always_none_with_data,
+                 on_data: CallbackData=always_none,
                  on_end: CallbackNoArgs=always_none) -> None:
         self._started = False
         self.on_start = on_start
@@ -738,8 +734,8 @@ class QuerystringParser:
                  max_size: int = MAX_INT,
                  on_field_start: CallbackNoArgs = always_none,
                  on_field_end: CallbackNoArgs = always_none,
-                 on_field_name: CallbackData = always_none_with_data,
-                 on_field_data: CallbackData = always_none_with_data,
+                 on_field_name: CallbackData = always_none,
+                 on_field_data: CallbackData = always_none,
                  on_end: CallbackNoArgs = always_none) -> None:
 
         self.state = STATE_BEFORE_FIELD
@@ -869,10 +865,10 @@ class MultipartParser:
                  boundary: Union[str, bytes],
                  max_size: int=MAX_INT,
                  on_part_begin: CallbackNoArgs=always_none,
-                 on_part_data: CallbackData=always_none_with_data,
+                 on_part_data: CallbackData=always_none,
                  on_part_end: CallbackNoArgs=always_none,
-                 on_header_field: CallbackData=always_none_with_data,
-                 on_header_value: CallbackData=always_none_with_data,
+                 on_header_field: CallbackData=always_none,
+                 on_header_value: CallbackData=always_none,
                  on_header_end: CallbackNoArgs=always_none,
                  on_headers_finished: CallbackNoArgs=always_none,
                  on_end: CallbackNoArgs=always_none
@@ -1333,61 +1329,214 @@ class MultipartParser:
         pass
 
 
-class FormParser(object):
-    """This class is the all-in-one form parser.  Given all the information
-    necessary to parse a form, it will instantiate the correct parser, create
-    the proper :class:`Field` and :class:`File` classes to store the data that
-    is parsed, and call the two given callbacks with each field and file as
-    they become available.
+OnFile = Callable[[Any], None]
 
-    :param content_type: The Content-Type of the incoming request.  This is
-                         used to select the appropriate parser.
+OnField = Callable[[Any], None]
 
-    :param on_field: The callback to call when a field has been parsed and is
-                     ready for usage.  See above for parameters.
 
-    :param on_file: The callback to call when a file has been parsed and is
-                    ready for usage.  See above for parameters.
+def get_octet_stream_parser(
+        max_body_size: int,
+        config: Dict,
+        file_name: str,
+        file_class: Any,
+        on_file: OnFile,
+        on_end: CallbackNoArgs) -> OctetStreamParser:
+    f: Any = None
 
-    :param on_end: An optional callback to call when all fields and files in a
-                   request has been parsed.  Can be None.
+    def on_start() -> None:
+        nonlocal f
+        f = file_class(file_name, None, config=config)
 
-    :param boundary: If the request is a multipart/form-data request, this
-                     should be the boundary of the request, as given in the
-                     Content-Type header.
+    def on_data(data, start, end) -> None:
+        nonlocal f
+        f.write(data[start:end])
 
-    :param file_name: If the request is of type application/octet-stream, then
-                      the body of the request will not contain any information
-                      about the uploaded file.  In such cases, you can provide
-                      the file name of the uploaded file manually.
+    def on_end_() -> None:
+        nonlocal f
+        f.finalize()
+        on_file(f)
+        on_end()
 
-    :param file_class: The class to use for uploaded files.  Defaults to
-                      :class:`File`, but you can provide your own class if you
-                      wish to customize behaviour.  The class will be
-                      instantiated as file_class(file_name, field_name), and it
-                      must provide the following functions::
-                          file_instance.write(data)
-                          file_instance.finalize()
-                          file_instance.close()
+    return OctetStreamParser(
+        max_size=max_body_size,
+        on_start=on_start,
+        on_data=on_data,
+        on_end=on_end_)
 
-    :param field_class: The class to use for uploaded fields.  Defaults to
-                       :class:`Field`, but you can provide your own class if
-                       you wish to customize behaviour.  The class will be
-                       instantiated as field_class(field_name), and it must
-                       provide the following functions::
-                           field_instance.write(data)
-                           field_instance.finalize()
-                           field_instance.close()
 
-    :param config: Configuration to use for this FormParser.  The default
-                   values are taken from the DEFAULT_CONFIG value, and then
-                   any keys present in this dictionary will overwrite the
-                   default values.
+def get_query_string_parser(max_body_size: int,
+                            field_class: Any,
+                            on_field: OnField,
+                            on_end: CallbackNoArgs) -> QuerystringParser:
+    name_buffer = []
 
-    """
-    #: This is the default configuration for our form parser.
-    #: Note: all file sizes should be in bytes.
-    DEFAULT_CONFIG = {
+    f = None
+
+    def on_field_start() -> None:
+        pass
+
+    def on_field_name(data, start: int, end: int) -> None:
+        name_buffer.append(data[start:end])
+
+    def on_field_data(data, start: int, end: int) -> None:
+        nonlocal f
+        if f is None:
+            f = field_class(b''.join(name_buffer))
+            del name_buffer[:]
+        f.write(data[start:end])
+
+    def on_field_end():
+        nonlocal f
+        # Finalize and call callback.
+        if f is None:
+            # If we get here, it's because there was no field data.
+            # We create a field, set it to None, and then continue.
+            f = field_class(b''.join(name_buffer))
+            del name_buffer[:]
+            f.set_none()
+
+        f.finalize()
+        on_field(f)
+        f = None
+
+    # Instantiate parser.
+    return QuerystringParser(
+        max_size=max_body_size,
+        on_field_start=on_field_start,
+        on_field_name=on_field_name,
+        on_field_data=on_field_data,
+        on_field_end=on_field_end,
+        on_end=on_end)
+
+
+def get_multipart_parser(max_body_size: int,
+                         boundary: Union[bytes, str],
+                         on_file: OnFile,
+                         on_field: OnField,
+                         file_class: Any,
+                         field_class: Any,
+                         config: Dict,
+                         on_end: CallbackNoArgs) -> MultipartParser:
+    header_name = []
+    header_value = []
+    headers = {}
+
+    f = None
+    writer = None
+    is_file = False
+
+    def on_part_begin() -> None:
+        pass
+
+    def on_part_data(data, start: int, end: int) -> None:
+        nonlocal writer
+        assert writer is not None
+        bytes_processed = writer.write(data[start:end])
+        # TODO: check for error here.
+        return bytes_processed
+
+    def on_part_end() -> None:
+        nonlocal f
+        nonlocal is_file
+        assert f is not None
+        f.finalize()
+        if is_file:
+            on_file(f)
+        else:
+            on_field(f)
+
+    def on_header_field(data, start: int, end: int) -> None:
+        header_name.append(data[start:end])
+
+    def on_header_value(data, start: int, end: int) -> None:
+        header_value.append(data[start:end])
+
+    def on_header_end() -> None:
+        headers[b''.join(header_name)] = b''.join(header_value)
+        del header_name[:]
+        del header_value[:]
+
+    def on_headers_finished() -> None:
+        nonlocal is_file
+        nonlocal f
+        nonlocal writer
+        # Reset the 'is file' flag.
+        is_file = False
+
+        # Parse the content-disposition header.
+        # TODO: handle mixed case
+        content_disp = headers.get(b'Content-Disposition')
+        disp, options = parse_options_header(content_disp)
+
+        # Get the field and filename.
+        field_name = options.get(b'name')
+        file_name = options.get(b'filename')
+        # TODO: check for errors
+
+        # Create the proper class.
+        if file_name is None:
+            f = field_class(field_name)
+        else:
+            f = file_class(file_name, field_name, config=config)
+            is_file = True
+
+        # Parse the given Content-Transfer-Encoding to determine what
+        # we need to do with the incoming data.
+        # TODO: check that we properly handle 8bit / 7bit encoding.
+        transfer_encoding = headers.get(b'Content-Transfer-Encoding',
+                                        b'7bit')
+
+        if (transfer_encoding == b'binary' or
+                transfer_encoding == b'8bit' or
+                transfer_encoding == b'7bit'):
+            writer = f
+
+        elif transfer_encoding == b'base64':
+            writer = Base64Decoder(f)
+
+        elif transfer_encoding == b'quoted-printable':
+            writer = QuotedPrintableDecoder(f)
+
+        else:
+            if config['UPLOAD_ERROR_ON_BAD_CTE']:
+                raise FormParserError(
+                    'Unknown Content-Transfer-Encoding "{0}"'.format(
+                        transfer_encoding))
+            else:
+                # If we aren't erroring, then we just treat this as an
+                # unencoded Content-Transfer-Encoding.
+                writer = f
+
+    def on_end_() -> None:
+        assert writer is not None
+        writer.finalize()
+        on_end()
+
+    # Instantiate a multipart parser.
+    return MultipartParser(boundary,
+                           max_size=max_body_size,
+                           on_part_begin=on_part_begin,
+                           on_part_data=on_part_data,
+                           on_part_end=on_part_end,
+                           on_header_field=on_header_field,
+                           on_header_value=on_header_value,
+                           on_header_end=on_header_end,
+                           on_headers_finished=on_headers_finished,
+                           on_end=on_end_)
+
+
+def get_form_parser(content_type: str,
+                    on_field: OnField,
+                    on_file: OnFile,
+                    on_end: CallbackNoArgs = always_none,
+                    boundary: Union[bytes, str, None]=None,
+                    file_name=None,
+                    file_class=File,
+                    field_class=Field,
+                    config=None) -> Writeable:
+    config_from_arg = empty_dict_if_none(config)
+    # Set configuration options.
+    config = {
         'MAX_BODY_SIZE': MAX_INT,
         'MAX_MEMORY_FILE_SIZE': 1 * 1024 * 1024,
         'UPLOAD_DIR': None,
@@ -1397,253 +1546,51 @@ class FormParser(object):
         # Error on invalid Content-Transfer-Encoding?
         'UPLOAD_ERROR_ON_BAD_CTE': False,
     }
+    config.update(config_from_arg)
 
-    def __init__(self,
-                 content_type: str,
-                 on_field,
-                 on_file,
-                 on_end=None,
-                 boundary: Optional[bytes] = None,
-                 file_name=None,
-                 file_class=File,
-                 field_class=Field,
-                 config=None) -> None:
-        # Save variables.
-        self.content_type = content_type
-        self.boundary = boundary
-        self.bytes_received = 0
+    max_body_size = config['MAX_BODY_SIZE']
 
-        # Save callbacks.
-        self.on_field = on_field
-        self.on_file = on_file
-        self.on_end = on_end
+    assert isinstance(max_body_size, int)
 
-        # Save classes.
-        self.file_class = File
-        self.field_class = Field
+    # Depending on the Content-Type, we instantiate the correct parser.
+    if content_type == 'application/octet-stream':
+        return get_octet_stream_parser(max_body_size,
+                                       config,
+                                       file_name,
+                                       file_class,
+                                       on_file,
+                                       on_end)
+    elif (content_type == 'application/x-www-form-urlencoded' or
+          content_type == 'application/x-url-encoded'):
+        return get_query_string_parser(max_body_size,
+                                       field_class,
+                                       on_field,
+                                       on_end)
 
-        # Set configuration options.
-        self.config = self.DEFAULT_CONFIG.copy()
-        self.config.update(empty_dict_if_none(config))
-
-        max_body_size = self.config['MAX_BODY_SIZE']
-
-        assert isinstance(max_body_size, int)
-
-        # Depending on the Content-Type, we instantiate the correct parser.
-        if content_type == 'application/octet-stream':
-            f: Any = None
-
-            def on_start() -> None:
-                nonlocal f
-                f = file_class(file_name, None, config=self.config)
-
-            def on_data(data, start, end) -> None:
-                nonlocal f
-                f.write(data[start:end])
-
-            def on_end() -> None:
-                nonlocal f
-                # Finalize the file itself.
-                f.finalize()
-
-                # Call our callback.
-                on_file(f)
-
-                # Call the on-end callback.
-                if self.on_end is not None:
-                    self.on_end()
-
-            self.parser: Writeable = OctetStreamParser(
-                max_size=max_body_size,
-                on_start=on_start,
-                on_data=on_data,
-                on_end=on_end)
-
-        elif (content_type == 'application/x-www-form-urlencoded' or
-              content_type == 'application/x-url-encoded'):
-
-            name_buffer = []
-
-            f = None
-
-            def on_field_start() -> None:
-                pass
-
-            def on_field_name(data, start: int, end: int) -> None:
-                name_buffer.append(data[start:end])
-
-            def on_field_data(data, start: int, end: int) -> None:
-                nonlocal f
-                if f is None:
-                    f = field_class(b''.join(name_buffer))
-                    del name_buffer[:]
-                f.write(data[start:end])
-
-            def on_field_end():
-                nonlocal f
-                # Finalize and call callback.
-                if f is None:
-                    # If we get here, it's because there was no field data.
-                    # We create a field, set it to None, and then continue.
-                    f = field_class(b''.join(name_buffer))
-                    del name_buffer[:]
-                    f.set_none()
-
-                f.finalize()
-                on_field(f)
-                f = None
-
-            def on_end() -> None:
-                if self.on_end is not None:
-                    self.on_end()
-
-            # Instantiate parser.
-            self.parser = QuerystringParser(
-                max_size=max_body_size,
-                on_field_start=on_field_start,
-                on_field_name=on_field_name,
-                on_field_data=on_field_data,
-                on_field_end=on_field_end,
-                on_end=on_end,
-            )
-
-        elif content_type == 'multipart/form-data':
-            if boundary is None:
-                raise FormParserError("No boundary given")
-
-            header_name = []
-            header_value = []
-            headers = {}
-
-            f = None
-            writer = None
-            is_file = False
-
-            def on_part_begin() -> None:
-                pass
-
-            def on_part_data(data, start: int, end: int) -> None:
-                nonlocal writer
-                assert writer is not None
-                bytes_processed = writer.write(data[start:end])
-                # TODO: check for error here.
-                return bytes_processed
-
-            def on_part_end() -> None:
-                nonlocal f
-                nonlocal is_file
-                f.finalize()
-                if is_file:
-                    on_file(f)
-                else:
-                    on_field(f)
-
-            def on_header_field(data, start: int, end: int) -> None:
-                header_name.append(data[start:end])
-
-            def on_header_value(data, start: int, end: int) -> None:
-                header_value.append(data[start:end])
-
-            def on_header_end() -> None:
-                headers[b''.join(header_name)] = b''.join(header_value)
-                del header_name[:]
-                del header_value[:]
-
-            def on_headers_finished() -> None:
-                nonlocal is_file
-                nonlocal f
-                nonlocal writer
-                # Reset the 'is file' flag.
-                is_file = False
-
-                # Parse the content-disposition header.
-                # TODO: handle mixed case
-                content_disp = headers.get(b'Content-Disposition')
-                disp, options = parse_options_header(content_disp)
-
-                # Get the field and filename.
-                field_name = options.get(b'name')
-                file_name = options.get(b'filename')
-                # TODO: check for errors
-
-                # Create the proper class.
-                if file_name is None:
-                    f = field_class(field_name)
-                else:
-                    f = file_class(file_name, field_name, config=self.config)
-                    is_file = True
-
-                # Parse the given Content-Transfer-Encoding to determine what
-                # we need to do with the incoming data.
-                # TODO: check that we properly handle 8bit / 7bit encoding.
-                transfer_encoding = headers.get(b'Content-Transfer-Encoding',
-                                                b'7bit')
-
-                if (transfer_encoding == b'binary' or
-                        transfer_encoding == b'8bit' or
-                        transfer_encoding == b'7bit'):
-                    writer = f
-
-                elif transfer_encoding == b'base64':
-                    writer = Base64Decoder(f)
-
-                elif transfer_encoding == b'quoted-printable':
-                    writer = QuotedPrintableDecoder(f)
-
-                else:
-                    if self.config['UPLOAD_ERROR_ON_BAD_CTE']:
-                        raise FormParserError(
-                            'Unknown Content-Transfer-Encoding "{0}"'.format(
-                                transfer_encoding))
-                    else:
-                        # If we aren't erroring, then we just treat this as an
-                        # unencoded Content-Transfer-Encoding.
-                        writer = f
-
-            def on_end() -> None:
-                assert writer is not None
-                writer.finalize()
-                if self.on_end is not None:
-                    self.on_end()
-
-            # Instantiate a multipart parser.
-            self.parser = MultipartParser(boundary,
-                                          max_size=max_body_size,
-                                          on_part_begin=on_part_begin,
-                                          on_part_data=on_part_data,
-                                          on_part_end=on_part_end,
-                                          on_header_field=on_header_field,
-                                          on_header_value=on_header_value,
-                                          on_header_end=on_header_end,
-                                          on_headers_finished=on_headers_finished,
-                                          on_end=on_end)
-
+    elif content_type == 'multipart/form-data':
+        if boundary is None:
+            raise FormParserError("No boundary given")
         else:
-            raise FormParserError("Unknown Content-Type: {0}".format(
-                content_type
-            ))
+            return get_multipart_parser(max_body_size,
+                                        boundary,
+                                        on_file,
+                                        on_field,
+                                        file_class,
+                                        field_class,
+                                        config,
+                                        on_end)
 
-    def write(self, data: bytes) -> int:
-        """
-        Write some data.  The parser will forward this to the appropriate
-        underlying parser.
-        """
-        self.bytes_received += len(data)
-        # TODO: check the parser's return value for errors?
-        return self.parser.write(data)
-
-    def finalize(self) -> None:
-        if self.parser is not None and hasattr(self.parser, 'finalize'):
-            self.parser.finalize()
+    else:
+        raise FormParserError(f"Unknown Content-Type: {content_type}")
 
 
 def create_form_parser(headers,
                        on_field: Callable[[Any], None],
                        on_file: Callable[[Any], None],
                        config: Dict[str, Any]=None):
-    """This function is a helper function to aid in creating a FormParser
-    instances.  Given a dictionary-like headers object, it will determine
+    """
+    This function is a helper function to aid in creating FormParser
+    instances.  Given dictionary-like headers object, it will determine
     the correct information needed, instantiate a FormParser with the
     appropriate values and given callbacks, and then return the corresponding
     parser.
@@ -1667,27 +1614,24 @@ def create_form_parser(headers,
     boundary = params.get(b'boundary')
 
     # We need content_type to be a string, not a bytes object.
-    content_type = content_type.decode('latin-1')
+    content_type = content_type.decode('utf8')
 
     # File names are optional.
     file_name = headers.get('X-File-Name')
 
     # Instantiate a form parser.
-    form_parser = FormParser(content_type,
-                             on_field,
-                             on_file,
-                             boundary=boundary,
-                             file_name=file_name,
-                             config=empty_dict_if_none(config))
-
-    # Return our parser.
-    return form_parser
+    return get_form_parser(content_type,
+                           on_field,
+                           on_file,
+                           boundary=boundary,
+                           file_name=file_name,
+                           config=empty_dict_if_none(config))
 
 
 def parse_form(headers,
                input_stream,
-               on_field: Callable[[Any], None],
-               on_file: Callable[[Any], None]) -> None:
+               on_field: Callable[[Any], None]=always_none,
+               on_file: Callable[[Any], None]=always_none) -> None:
     """This function is useful if you just want to parse a request body,
     without too much work.  Pass it a dictionary-like object of the request's
     headers, and a file-like object for the input stream, along with two
@@ -1714,8 +1658,8 @@ def parse_form(headers,
         content_length = int(content_length)
     else:
         content_length = MAX_INT
-    bytes_read = 0
 
+    bytes_read = 0
     while True:
         # Read only up to the Content-Length given.
         max_readable = min(content_length - bytes_read, 1048576)

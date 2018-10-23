@@ -10,10 +10,11 @@ from multipart.exceptions import (
     QuerystringParseError
 )
 from multipart.multipart import (
+    always_none,
     create_form_parser,
     Field,
     File,
-    FormParser,
+    get_form_parser,
     OctetStreamParser,
     parse_form,
     parse_options_header,
@@ -694,7 +695,7 @@ def split_all(val):
 
 
 @parametrize_class
-class TestFormParser(unittest.TestCase):
+class TestGetget_form_parser(unittest.TestCase):
     def make(self, boundary, config={}):
         self.ended = False
         self.files = []
@@ -710,11 +711,12 @@ class TestFormParser(unittest.TestCase):
             self.ended = True
 
         # Get a form-parser instance.
-        self.f = FormParser('multipart/form-data',
-                            on_field,
-                            on_file,
-                            on_end,
-                            boundary=boundary, config=config)
+        self.f = get_form_parser('multipart/form-data',
+                                 on_field,
+                                 on_file,
+                                 on_end,
+                                 boundary=boundary,
+                                 config=config)
 
     def assert_file_data(self, f, data):
         o = f.file_object
@@ -775,11 +777,6 @@ class TestFormParser(unittest.TestCase):
         except MultipartParseError as e:
             processed = 0
             exc = e
-
-        # print(repr(param))
-        # print("")
-        # print(repr(self.fields))
-        # print(repr(self.files))
 
         # Do we expect an error?
         if 'error' in param['result']['expected']:
@@ -1032,9 +1029,12 @@ class TestFormParser(unittest.TestCase):
         on_field = Mock()
         on_end = Mock()
 
-        f = FormParser('application/octet-stream', on_field, on_file, on_end=on_end,
-                       file_name=b'foo.txt')
-        self.assertTrue(isinstance(f.parser, OctetStreamParser))
+        f = get_form_parser('application/octet-stream',
+                            on_field,
+                            on_file,
+                            on_end=on_end,
+                            file_name=b'foo.txt')
+        self.assertTrue(isinstance(f, OctetStreamParser))
 
         f.write(b'test')
         f.write(b'1234')
@@ -1081,25 +1081,29 @@ class TestFormParser(unittest.TestCase):
             # ... and assert that we've finished.
             self.assertTrue(on_end.called)
 
-        f = FormParser('application/x-www-form-urlencoded', on_field, on_file,
-                       on_end=on_end)
-        self.assertTrue(isinstance(f.parser, QuerystringParser))
+        f = get_form_parser('application/x-www-form-urlencoded',
+                            on_field, on_file,
+                            on_end=on_end)
+        self.assertTrue(isinstance(f, QuerystringParser))
         simple_test(f)
 
-        f = FormParser('application/x-url-encoded', on_field, on_file, on_end=on_end)
-        self.assertTrue(isinstance(f.parser, QuerystringParser))
+        f = get_form_parser('application/x-url-encoded',
+                            on_field,
+                            on_file,
+                            on_end=on_end)
+        self.assertTrue(isinstance(f, QuerystringParser))
         simple_test(f)
 
     def test_bad_content_type(self):
         # We should raise a ValueError for a bad Content-Type
         with self.assertRaises(ValueError):
-            FormParser('application/bad', None, None)
+            get_form_parser('application/bad', None, None)
 
     def test_no_boundary_given(self):
         # We should raise a FormParserError when parsing a multipart message
         # without a boundary.
         with self.assertRaises(FormParserError):
-            FormParser('multipart/form-data', None, None)
+            get_form_parser('multipart/form-data', None, None)
 
     def test_bad_content_transfer_encoding(self):
         data = b'----boundary\r\nContent-Disposition: form-data; name="file"; filename="test.txt"\r\nContent-Type: text/plain\r\nContent-Transfer-Encoding: badstuff\r\n\r\nTest\r\n----boundary--\r\n'  # noqa: E501
@@ -1114,8 +1118,12 @@ class TestFormParser(unittest.TestCase):
 
         # Test with erroring.
         config = {'UPLOAD_ERROR_ON_BAD_CTE': True}
-        form_parser = FormParser('multipart/form-data', on_field, on_file,
-                                 on_end=on_end, boundary='--boundary', config=config)
+        form_parser = get_form_parser('multipart/form-data',
+                                      on_field,
+                                      on_file,
+                                      on_end=on_end,
+                                      boundary='--boundary',
+                                      config=config)
 
         with self.assertRaises(FormParserError):
             form_parser.write(data)
@@ -1123,8 +1131,12 @@ class TestFormParser(unittest.TestCase):
 
         # Test without erroring.
         config = {'UPLOAD_ERROR_ON_BAD_CTE': False}
-        form_parser = FormParser('multipart/form-data', on_field, on_file,
-                                 on_end=on_end, boundary='--boundary', config=config)
+        form_parser = get_form_parser('multipart/form-data',
+                                      on_field,
+                                      on_file,
+                                      on_end=on_end,
+                                      boundary='--boundary',
+                                      config=config)
 
         form_parser.write(data)
         form_parser.finalize()
@@ -1139,8 +1151,10 @@ class TestFormParser(unittest.TestCase):
         on_file = Mock()
         on_end = Mock()
 
-        f = FormParser('application/x-www-form-urlencoded', on_field, on_file,
-                       on_end=on_end)
+        f = get_form_parser('application/x-www-form-urlencoded',
+                            on_field,
+                            on_file,
+                            on_end=on_end)
         f.write(b'foo=bar&another&baz=asdf')
         f.finalize()
 
@@ -1164,7 +1178,7 @@ class TestFormParser(unittest.TestCase):
 
         # Set the maximum length that we can process to be halfway through the
         # given data.
-        self.f.parser.max_size = len(test_data) / 2
+        self.f.max_size = len(test_data) / 2
 
         i = self.f.write(test_data)
         self.f.finalize()
@@ -1198,9 +1212,12 @@ class TestFormParser(unittest.TestCase):
         on_field = Mock()
         on_end = Mock()
 
-        f = FormParser('application/octet-stream', on_field, on_file,
-                       on_end=on_end, file_name=b'foo.txt',
-                       config={'MAX_BODY_SIZE': 10})
+        f = get_form_parser('application/octet-stream',
+                            on_field,
+                            on_file,
+                            on_end=on_end,
+                            file_name=b'foo.txt',
+                            config={'MAX_BODY_SIZE': 10})
 
         f.write(b'0123456789012345689')
         f.finalize()
@@ -1211,13 +1228,14 @@ class TestFormParser(unittest.TestCase):
 class TestHelperFunctions(unittest.TestCase):
     def test_create_form_parser(self):
         r = create_form_parser({'Content-Type': 'application/octet-stream'},
-                               None, None)
-        self.assertTrue(isinstance(r, FormParser))
+                               always_none,
+                               always_none)
+        self.assertTrue(isinstance(r, OctetStreamParser))
 
     def test_create_form_parser_error(self):
         headers = {}
         with self.assertRaises(ValueError):
-            create_form_parser(headers, None, None)
+            create_form_parser(headers, always_none, always_none)
 
     def test_parse_form(self):
         on_field = Mock()
@@ -1263,8 +1281,8 @@ def suite():
     suite.addTest(unittest.makeSuite(TestQuerystringParser))
     suite.addTest(unittest.makeSuite(TestOctetStreamParser))
     suite.addTest(unittest.makeSuite(TestBase64Decoder))
+    suite.addTest(unittest.makeSuite(TestGetget_form_parser))
     suite.addTest(unittest.makeSuite(TestQuotedPrintableDecoder))
-    suite.addTest(unittest.makeSuite(TestFormParser))
     suite.addTest(unittest.makeSuite(TestHelperFunctions))
 
     return suite
