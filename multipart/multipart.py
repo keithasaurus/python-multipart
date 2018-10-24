@@ -943,7 +943,7 @@ class MultipartParser:
             self.marks[name] = i
 
         # Remove a mark.
-        def delete_mark(name, reset=False):
+        def delete_mark(name):
             self.marks.pop(name, None)
 
         # Helper function that makes calling a callback with data easier. The
@@ -1253,9 +1253,6 @@ class MultipartParser:
                 elif prev_index > 0:
                     # write the saved data
                     self.on_part_data(join_bytes(self.lookbehind), 0, prev_index)
-
-                    # Overwrite our previous index.
-                    prev_index = 0
 
                     # Re-set our mark for part data.
                     set_mark('part_data')
@@ -1590,7 +1587,8 @@ def parse_form(headers,
                input_stream,
                on_field: Callable[[Any], None]=always_none,
                on_file: Callable[[Any], None]=always_none) -> None:
-    """This function is useful if you just want to parse a request body,
+    """
+    This function is useful if you just want to parse a request body,
     without too much work.  Pass it a dictionary-like object of the request's
     headers, and a file-like object for the input stream, along with two
     callbacks that will get called whenever a field or file is parsed.
