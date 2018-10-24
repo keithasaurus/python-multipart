@@ -293,11 +293,11 @@ class File:
     def __init__(self,
                  file_name: bytes,
                  field_name=None,
-                 max_memory_file_size: Optional[int]=MAX_INT,
-                 upload_dir: Optional[bytes]=None,
-                 upload_keep_filename: bool=False,
-                 upload_keep_extensions: bool=False,
-                 upload_delete_tmp: bool=True) -> None:
+                 max_memory_file_size: Optional[int] = MAX_INT,
+                 upload_dir: Optional[bytes] = None,
+                 upload_keep_filename: bool = False,
+                 upload_keep_extensions: bool = False,
+                 upload_delete_tmp: bool = True) -> None:
         self.in_memory = True
         self.size = 0
         self.file_object = BytesIO()
@@ -490,10 +490,10 @@ class OctetStreamParser:
                      i.e. unbounded.
     """
     def __init__(self,
-                 max_size: int=MAX_INT,
-                 on_start: CallbackNoArgs=always_none,
-                 on_data: CallbackData=always_none,
-                 on_end: CallbackNoArgs=always_none) -> None:
+                 max_size: int = MAX_INT,
+                 on_start: CallbackNoArgs = always_none,
+                 on_data: CallbackData = always_none,
+                 on_end: CallbackNoArgs = always_none) -> None:
         self._started = False
         self.on_start = on_start
         self.on_end = on_end
@@ -854,15 +854,15 @@ class MultipartParser:
 
     def __init__(self,
                  boundary: Union[str, bytes],
-                 max_size: int=MAX_INT,
-                 on_part_begin: CallbackNoArgs=always_none,
-                 on_part_data: CallbackData=always_none,
-                 on_part_end: CallbackNoArgs=always_none,
-                 on_header_field: CallbackData=always_none,
-                 on_header_value: CallbackData=always_none,
-                 on_header_end: CallbackNoArgs=always_none,
-                 on_headers_finished: CallbackNoArgs=always_none,
-                 on_end: CallbackNoArgs=always_none) -> None:
+                 max_size: int = MAX_INT,
+                 on_part_begin: CallbackNoArgs = always_none,
+                 on_part_data: CallbackData = always_none,
+                 on_part_end: CallbackNoArgs = always_none,
+                 on_header_field: CallbackData = always_none,
+                 on_header_value: CallbackData = always_none,
+                 on_header_end: CallbackNoArgs = always_none,
+                 on_headers_finished: CallbackNoArgs = always_none,
+                 on_end: CallbackNoArgs = always_none) -> None:
         self.state = STATE_START
         self.index = self.flags = 0
 
@@ -1505,12 +1505,12 @@ def get_form_parser(content_type: str,
                     on_field: OnField,
                     on_file: OnFile,
                     on_end: CallbackNoArgs = always_none,
-                    boundary: Union[bytes, str, None]=None,
+                    boundary: Union[bytes, str, None] = None,
                     file_name=None,
                     file_class=File,
                     field_class=Field,
-                    max_body_size: int=MAX_INT,
-                    upload_error_on_bad_cte: bool=False) -> Writeable:
+                    max_body_size: int = MAX_INT,
+                    upload_error_on_bad_cte: bool = False) -> Writeable:
 
     # Depending on the Content-Type, we instantiate the correct parser.
     if content_type == 'application/octet-stream':
@@ -1585,8 +1585,8 @@ def create_form_parser(headers,
 
 def parse_form(headers,
                input_stream,
-               on_field: Callable[[Any], None]=always_none,
-               on_file: Callable[[Any], None]=always_none) -> None:
+               on_field: Callable[[Any], None] = always_none,
+               on_file: Callable[[Any], None] = always_none) -> None:
     """
     This function is useful if you just want to parse a request body,
     without too much work.  Pass it a dictionary-like object of the request's
