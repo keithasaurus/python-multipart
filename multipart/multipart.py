@@ -4,12 +4,12 @@ from multipart.exceptions import (
     FileError,
     FormParserError,
     MultipartParseError,
+    ParseError,
     QuerystringParseError
 )
 from numbers import Number
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from typing_extensions import Protocol
-from warnings import warn
 
 import os
 import re
@@ -569,12 +569,10 @@ def query_string_parser_internal_write(state: int,
                 if found_sep:
                     # If we're parsing strictly, we disallow blank chunks.
                     if strict_parsing:
-                        e = QuerystringParseError(
-                            "Skipping duplicate ampersand/semicolon at "
-                            "%d" % i
-                        )
-                        e.offset = i
-                        raise e
+                        raise_with_offset(
+                            i,
+                            QuerystringParseError(
+                                f"Skipping duplicate ampersand/semicolon at {i}"))
                     else:
                         pass
                 else:
@@ -638,14 +636,12 @@ def query_string_parser_internal_write(state: int,
                     # We're parsing strictly.  If we find a seperator,
                     # this is an error - we require an equals sign.
                     if sep_pos != -1:
-                        e = QuerystringParseError(
-                            "When strict_parsing is True, we require an "
-                            "equals sign in all field chunks. Did not "
-                            "find one in the chunk that starts at %d" %
-                            (i,)
-                        )
-                        e.offset = i
-                        raise e
+                        raise_with_offset(
+                            i,
+                            QuerystringParseError(
+                                f"When strict_parsing is True, we require an "
+                                "equals sign in all field chunks. Did not "
+                                "find one in the chunk that starts at {i}"))
 
                     # No seperator in the rest of this chunk, so it's just
                     # a field name.
@@ -678,13 +674,17 @@ def query_string_parser_internal_write(state: int,
                 i = length
 
         else:
-            e = QuerystringParseError(f"Reached an unknown state {state} at {i}")
-            e.offset = i
-            raise e
+            raise_with_offset(i, QuerystringParseError(
+                f"Reached an unknown state {state} at {i}"))
 
         i += 1
 
     return state, found_sep
+
+
+def raise_with_offset(offset: int, err: ParseError) -> None:
+    err.offset = offset
+    raise err
 
 
 class QuerystringParser:
@@ -1002,19 +1002,15 @@ class MultipartParser:
                 # are CRLF.
                 if index == len(boundary) - 2:
                     if c != CR:
-                        e = MultipartParseError(
-                            f"Did not find CR at end of boundary ({i})")
-                        e.offset = i
-                        raise e
+                        raise_with_offset(i, MultipartParseError(
+                            f"Did not find CR at end of boundary ({i})"))
 
                     index += 1
 
                 elif index == len(boundary) - 2 + 1:
                     if c != LF:
-                        e = MultipartParseError(
-                            f"Did not find LF at end of boundary ({i})")
-                        e.offset = i
-                        raise e
+                        raise_with_offset(i, MultipartParseError(
+                            f"Did not find LF at end of boundary ({i})"))
 
                     # The index is now used for indexing into our boundary.
                     index = 0
@@ -1028,11 +1024,11 @@ class MultipartParser:
                 else:
                     # Check to ensure our boundary matches
                     if c != boundary[index + 2]:
-                        e = MultipartParseError(
-                            f"Did not find boundary character {c} at "
-                            f"index {index + 2}")
-                        e.offset = i
-                        raise e
+                        raise_with_offset(
+                            i,
+                            MultipartParseError(
+                                f"Did not find boundary character {c} at "
+                                f"index {index + 2}"))
 
                     # Increment index into boundary and continue.
                     index += 1
@@ -1070,10 +1066,9 @@ class MultipartParser:
                 elif c == COLON:
                     # A 0-length header is an error.
                     if index == 1:
-                        msg = "Found 0-length header at %d" % (i,)
-                        e = MultipartParseError(msg)
-                        e.offset = i
-                        raise e
+                        raise_with_offset(
+                            i,
+                            MultipartParseError(f"Found 0-length header at {i}"))
 
                     # Call our callback with the header field.
                     data_callback('header_field')
@@ -1086,10 +1081,11 @@ class MultipartParser:
                     # a valid letter.  If not, it's an error.
                     cl = lower_char(c)
                     if cl < LOWER_A or cl > LOWER_Z:
-                        e = MultipartParseError(
-                            f"Found non-alphanumeric character {c} in header at {i}")
-                        e.offset = i
-                        raise e
+                        raise_with_offset(
+                            i,
+                            MultipartParseError(
+                                f"Found non-alphanumeric character {c} in "
+                                f"header at {i}"))
 
             elif state == STATE_HEADER_VALUE_START:
                 # Skip leading spaces.
@@ -1115,10 +1111,10 @@ class MultipartParser:
             elif state == STATE_HEADER_VALUE_ALMOST_DONE:
                 # The last character should be a LF.  If not, it's an error.
                 if c != LF:
-                    e = MultipartParseError(
-                        f"Did not find LF character at end of header (found {c})")
-                    e.offset = i
-                    raise e
+                    raise_with_offset(
+                        i,
+                        MultipartParseError(f"Did not find LF character at "
+                                            f"end of header (found {c})"))
 
                 # Move back to the start of another header.  Note that if that
                 # state detects ANOTHER newline, it'll trigger the end of our
@@ -1130,11 +1126,9 @@ class MultipartParser:
                 # a CR at the beginning of a header, so our next character
                 # should be a LF, or it's an error.
                 if c != LF:
-                    e = MultipartParseError(
+                    raise_with_offset(i, MultipartParseError(
                         "Did not find LF at end of headers (found %r)" % (c,)
-                    )
-                    e.offset = i
-                    raise e
+                    ))
 
                 self.on_headers_finished()
                 state = STATE_PART_DATA_START
@@ -1282,15 +1276,12 @@ class MultipartParser:
 
             elif state == STATE_END:
                 # Do nothing and just consume a byte in the end state.
-                if c not in (CR, LF):
-                    warn("Consuming a byte '0x%x' in the end state" % c)
-
-            else:                   # pragma: no cover (error case)
-                # We got into a strange state somehow!  Just stop processing.
-                e = MultipartParseError(
-                    "Reached an unknown state %d at %d" % (state, i))
-                e.offset = i
-                raise e
+                pass
+            else:
+                raise_with_offset(
+                    i,
+                    MultipartParseError(
+                        "Reached an unknown state %d at %d" % (state, i)))
 
             # Move to the next byte.
             i += 1
