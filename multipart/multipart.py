@@ -7,6 +7,7 @@ from multipart.exceptions import (
     ParseError,
     QuerystringParseError
 )
+from multipart.utils import FILE_SYSTEM_ENCODING, str_or_decode_bytes_system
 from numbers import Number
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from typing_extensions import Protocol
@@ -14,7 +15,6 @@ from typing_extensions import Protocol
 import os
 import re
 import shutil
-import sys
 import tempfile
 
 _missing = object()
@@ -232,16 +232,6 @@ class Field(object):
 
 def empty_dict_if_none(dict_or_none):
     return {} if dict_or_none is None else dict_or_none
-
-
-FILE_SYSTEM_ENCODING = sys.getfilesystemencoding()
-
-
-def str_or_decode_bytes_system(str_or_bytes: Union[str, bytes]) -> str:
-    if isinstance(str_or_bytes, bytes):
-        return str_or_bytes.decode(FILE_SYSTEM_ENCODING)
-    else:
-        return str_or_bytes
 
 
 class File:
@@ -462,7 +452,7 @@ def get_temp_file_details(
     else:
         fname: Union[str, bytes] = tmp_file.name
 
-        return tmp_file, (fname.encode(sys.getfilesystemencoding())
+        return tmp_file, (fname.encode(FILE_SYSTEM_ENCODING)
                           if isinstance(fname, str)
                           else fname)
 
