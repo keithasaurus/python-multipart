@@ -1335,7 +1335,6 @@ OnField = Callable[[Any], None]
 
 def get_octet_stream_parser(
         max_body_size: int,
-        config: Dict,
         file_name: str,
         file_class: Any,
         on_file: OnFile,
@@ -1344,7 +1343,7 @@ def get_octet_stream_parser(
 
     def on_start() -> None:
         nonlocal f
-        f = file_class(file_name, None, **config_to_file_kwargs(config))
+        f = file_class(file_name, None)
 
     def on_data(data, start, end) -> None:
         nonlocal f
@@ -1408,23 +1407,12 @@ def get_query_string_parser(max_body_size: int,
         on_end=on_end)
 
 
-def config_to_file_kwargs(config: Dict):
-    """temporary function; just for refactor sanity"""
-    return {k.lower(): v for k, v in config.items()
-            if k.lower() in ["upload_dir",
-                             "upload_keep_filename",
-                             "upload_keep_extensions",
-                             "upload_delete_tmp"
-                             "max_memory_file_size"]}
-
-
 def get_multipart_parser(max_body_size: int,
                          boundary: Union[bytes, str],
                          on_file: OnFile,
                          on_field: OnField,
                          file_class: Any,
                          field_class: Any,
-                         config: Dict,
                          on_end: CallbackNoArgs,
                          upload_error_on_bad_cte: bool) -> MultipartParser:
     header_name = []
@@ -1487,7 +1475,7 @@ def get_multipart_parser(max_body_size: int,
         if file_name is None:
             f = field_class(field_name)
         else:
-            f = file_class(file_name, field_name, **config_to_file_kwargs(config))
+            f = file_class(file_name, field_name)
             is_file = True
 
         # Parse the given Content-Transfer-Encoding to determine what
@@ -1545,17 +1533,10 @@ def get_form_parser(content_type: str,
                     field_class=Field,
                     max_body_size: int=MAX_INT,
                     upload_error_on_bad_cte: bool=False) -> Writeable:
-    config = {
-        'MAX_MEMORY_FILE_SIZE': 1 * 1024 * 1024,
-        'UPLOAD_DIR': None,
-        'UPLOAD_KEEP_FILENAME': False,
-        'UPLOAD_KEEP_EXTENSIONS': False,
-    }
 
     # Depending on the Content-Type, we instantiate the correct parser.
     if content_type == 'application/octet-stream':
         return get_octet_stream_parser(max_body_size,
-                                       config,
                                        file_name,
                                        file_class,
                                        on_file,
@@ -1577,7 +1558,6 @@ def get_form_parser(content_type: str,
                                         on_field,
                                         file_class,
                                         field_class,
-                                        config,
                                         on_end,
                                         upload_error_on_bad_cte)
 
