@@ -1609,16 +1609,15 @@ def parse_form(headers,
 
     # Read chunks of 100KiB and write to the parser, but never read more than
     # the given Content-Length, if any.
-    content_length = headers.get('Content-Length')
-    if content_length is not None:
-        content_length = int(content_length)
-    else:
+    try:
+        content_length = int(headers['Content-Length'])
+    except (KeyError, ValueError):
         content_length = MAX_INT
 
     bytes_read = 0
     while True:
         # Read only up to the Content-Length given.
-        max_readable = min(content_length - bytes_read, 1048576)
+        max_readable = min(content_length - bytes_read, 1024 * 1024)
         buff = input_stream.read(max_readable)
 
         # Write to the parser and update our length.
