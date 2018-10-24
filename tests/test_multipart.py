@@ -15,6 +15,7 @@ from multipart.multipart import (
     Field,
     File,
     get_form_parser,
+    MAX_INT,
     OctetStreamParser,
     parse_form,
     parse_options_header,
@@ -108,8 +109,8 @@ class TestFile(unittest.TestCase):
         f.seek(0)
         f.truncate()
 
-    def assert_exists(self, file: File, dir: bytes):
-        full_path = os.path.join(dir, file.actual_file_name)
+    def assert_exists(self, file: File, dir_: bytes):
+        full_path = os.path.join(dir_, file.actual_file_name)
         self.assertTrue(os.path.exists(full_path))
 
     def test_simple(self):
@@ -689,8 +690,8 @@ def split_all(val):
 
 
 @parametrize_class
-class TestGetget_form_parser(unittest.TestCase):
-    def make(self, boundary, config={}):
+class TestGetFormParser(unittest.TestCase):
+    def make(self, boundary, max_body_size=MAX_INT):
         self.ended = False
         self.files = []
         self.fields = []
@@ -710,7 +711,7 @@ class TestGetget_form_parser(unittest.TestCase):
                                  on_file,
                                  on_end,
                                  boundary=boundary,
-                                 config=config)
+                                 max_body_size=max_body_size)
 
     def assert_file_data(self, f, data):
         o = f.file_object
@@ -1110,27 +1111,23 @@ class TestGetget_form_parser(unittest.TestCase):
         on_field = Mock()
         on_end = Mock()
 
-        # Test with erroring.
-        config = {'UPLOAD_ERROR_ON_BAD_CTE': True}
         form_parser = get_form_parser('multipart/form-data',
                                       on_field,
                                       on_file,
                                       on_end=on_end,
                                       boundary='--boundary',
-                                      config=config)
+                                      upload_error_on_bad_cte=True)
 
         with self.assertRaises(FormParserError):
             form_parser.write(data)
             form_parser.finalize()
 
-        # Test without erroring.
-        config = {'UPLOAD_ERROR_ON_BAD_CTE': False}
         form_parser = get_form_parser('multipart/form-data',
                                       on_field,
                                       on_file,
                                       on_end=on_end,
                                       boundary='--boundary',
-                                      config=config)
+                                      upload_error_on_bad_cte=False)
 
         form_parser.write(data)
         form_parser.finalize()
@@ -1189,7 +1186,7 @@ class TestGetget_form_parser(unittest.TestCase):
         # Create form parser setting the maximum length that we can process to
         # be halfway through the given data.
         size = len(test_data) // 2
-        self.make('boundary', config={'MAX_BODY_SIZE': size})
+        self.make('boundary', max_body_size=size)
 
         i = self.f.write(test_data)
         self.f.finalize()
@@ -1211,7 +1208,7 @@ class TestGetget_form_parser(unittest.TestCase):
                             on_file,
                             on_end=on_end,
                             file_name=b'foo.txt',
-                            config={'MAX_BODY_SIZE': 10})
+                            max_body_size=10)
 
         f.write(b'0123456789012345689')
         f.finalize()
@@ -1275,7 +1272,7 @@ def suite():
     suite.addTest(unittest.makeSuite(TestQuerystringParser))
     suite.addTest(unittest.makeSuite(TestOctetStreamParser))
     suite.addTest(unittest.makeSuite(TestBase64Decoder))
-    suite.addTest(unittest.makeSuite(TestGetget_form_parser))
+    suite.addTest(unittest.makeSuite(TestGetFormParser))
     suite.addTest(unittest.makeSuite(TestQuotedPrintableDecoder))
     suite.addTest(unittest.makeSuite(TestHelperFunctions))
 

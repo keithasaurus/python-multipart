@@ -872,9 +872,7 @@ class MultipartParser:
                  on_header_value: CallbackData=always_none,
                  on_header_end: CallbackNoArgs=always_none,
                  on_headers_finished: CallbackNoArgs=always_none,
-                 on_end: CallbackNoArgs=always_none
-                 ) -> None:
-        super().__init__()
+                 on_end: CallbackNoArgs=always_none) -> None:
         self.state = STATE_START
         self.index = self.flags = 0
 
@@ -1427,7 +1425,8 @@ def get_multipart_parser(max_body_size: int,
                          file_class: Any,
                          field_class: Any,
                          config: Dict,
-                         on_end: CallbackNoArgs) -> MultipartParser:
+                         on_end: CallbackNoArgs,
+                         upload_error_on_bad_cte: bool) -> MultipartParser:
     header_name = []
     header_value = []
     headers = {}
@@ -1509,7 +1508,7 @@ def get_multipart_parser(max_body_size: int,
             writer = QuotedPrintableDecoder(f)
 
         else:
-            if config['UPLOAD_ERROR_ON_BAD_CTE']:
+            if upload_error_on_bad_cte:
                 raise FormParserError(
                     'Unknown Content-Transfer-Encoding "{0}"'.format(
                         transfer_encoding))
@@ -1544,24 +1543,14 @@ def get_form_parser(content_type: str,
                     file_name=None,
                     file_class=File,
                     field_class=Field,
-                    config=None) -> Writeable:
-    config_from_arg = empty_dict_if_none(config)
-    # Set configuration options.
+                    max_body_size: int=MAX_INT,
+                    upload_error_on_bad_cte: bool=False) -> Writeable:
     config = {
-        'MAX_BODY_SIZE': MAX_INT,
         'MAX_MEMORY_FILE_SIZE': 1 * 1024 * 1024,
         'UPLOAD_DIR': None,
         'UPLOAD_KEEP_FILENAME': False,
         'UPLOAD_KEEP_EXTENSIONS': False,
-
-        # Error on invalid Content-Transfer-Encoding?
-        'UPLOAD_ERROR_ON_BAD_CTE': False,
     }
-    config.update(config_from_arg)
-
-    max_body_size = config['MAX_BODY_SIZE']
-
-    assert isinstance(max_body_size, int)
 
     # Depending on the Content-Type, we instantiate the correct parser.
     if content_type == 'application/octet-stream':
@@ -1589,7 +1578,8 @@ def get_form_parser(content_type: str,
                                         file_class,
                                         field_class,
                                         config,
-                                        on_end)
+                                        on_end,
+                                        upload_error_on_bad_cte)
 
     else:
         raise FormParserError(f"Unknown Content-Type: {content_type}")
@@ -1597,8 +1587,7 @@ def get_form_parser(content_type: str,
 
 def create_form_parser(headers,
                        on_field: Callable[[Any], None],
-                       on_file: Callable[[Any], None],
-                       config: Dict[str, Any]=None):
+                       on_file: Callable[[Any], None]):
     """
     This function is a helper function to aid in creating FormParser
     instances.  Given dictionary-like headers object, it will determine
@@ -1612,8 +1601,6 @@ def create_form_parser(headers,
     :param on_field: Callback to call with each parsed field.
 
     :param on_file: Callback to call with each parsed file.
-
-    :param config: Configuration variables to pass to the FormParser.
     """
     content_type = headers.get('Content-Type')
     if content_type is None:
@@ -1635,8 +1622,7 @@ def create_form_parser(headers,
                            on_field,
                            on_file,
                            boundary=boundary,
-                           file_name=file_name,
-                           config=empty_dict_if_none(config))
+                           file_name=file_name)
 
 
 def parse_form(headers,
