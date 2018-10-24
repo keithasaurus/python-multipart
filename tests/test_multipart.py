@@ -95,134 +95,128 @@ class TestField(unittest.TestCase):
 
 
 class TestFile(unittest.TestCase):
-    def setUp(self):
-        self.c = {}
-        self.d = force_bytes(tempfile.mkdtemp())
-        self.f = File(b'foo.txt', config=self.c)
+    file_name = b"foo.txt"
 
-    def assert_data(self, data):
-        f = self.f.file_object
+    @staticmethod
+    def get_temp_dir_bytes() -> bytes:
+        return force_bytes(tempfile.mkdtemp())
+
+    def assert_data(self, file: File, data: bytes):
+        f = file.file_object
         f.seek(0)
         self.assertEqual(f.read(), data)
         f.seek(0)
         f.truncate()
 
-    def assert_exists(self):
-        full_path = os.path.join(self.d, self.f.actual_file_name)
+    def assert_exists(self, file: File, dir: bytes):
+        full_path = os.path.join(dir, file.actual_file_name)
         self.assertTrue(os.path.exists(full_path))
 
     def test_simple(self):
-        self.f.write(b'foobar')
-        self.assert_data(b'foobar')
+        f = File(self.file_name)
+        f.write(b'foobar')
+        self.assert_data(f, b'foobar')
 
     def test_invalid_write(self):
         m = Mock()
         m.write.return_value = 5
-        self.f.file_object = m
-        v = self.f.write(b'foobar')
+        f = File(b'foo.txt')
+        f.file_object = m
+        v = f.write(b'foobar')
         self.assertEqual(v, 5)
 
     def test_file_fallback(self):
-        self.c['MAX_MEMORY_FILE_SIZE'] = 1
+        f = File(self.file_name, max_memory_file_size=1)
 
-        self.f.write(b'1')
-        self.assertTrue(self.f.in_memory)
-        self.assert_data(b'1')
+        f.write(b'1')
+        self.assertTrue(f.in_memory)
+        self.assert_data(f, b'1')
 
-        self.f.write(b'123')
-        self.assertFalse(self.f.in_memory)
-        self.assert_data(b'123')
+        f.write(b'123')
+        self.assertFalse(f.in_memory)
+        self.assert_data(f, b'123')
 
         # Test flushing too.
-        old_obj = self.f.file_object
-        self.f.flush_to_disk()
-        self.assertFalse(self.f.in_memory)
-        self.assertIs(self.f.file_object, old_obj)
+        old_obj = f.file_object
+        f.flush_to_disk()
+        self.assertFalse(f.in_memory)
+        self.assertIs(f.file_object, old_obj)
 
     def test_file_fallback_with_data(self):
-        self.c['MAX_MEMORY_FILE_SIZE'] = 10
+        f = File(self.file_name, max_memory_file_size=10)
 
-        self.f.write(b'1' * 10)
-        self.assertTrue(self.f.in_memory)
+        f.write(b'1' * 10)
+        self.assertTrue(f.in_memory)
 
-        self.f.write(b'2' * 10)
-        self.assertFalse(self.f.in_memory)
+        f.write(b'2' * 10)
+        self.assertFalse(f.in_memory)
 
-        self.assert_data(b'11111111112222222222')
+        self.assert_data(f, b'11111111112222222222')
 
     def test_file_name(self):
-        # Write to this dir.
-        self.c['UPLOAD_DIR'] = self.d
-        self.c['MAX_MEMORY_FILE_SIZE'] = 10
+        f = File(self.file_name,
+                 max_memory_file_size=10,
+                 upload_dir=self.get_temp_dir_bytes())
 
-        # Write.
-        self.f.write(b'12345678901')
-        self.assertFalse(self.f.in_memory)
-
-        # Assert that the file exists
-        self.assertIsNotNone(self.f.actual_file_name)
-        self.assert_exists()
+        f.write(b'12345678901')
+        self.assertFalse(f.in_memory)
+        self.assertIsNotNone(f.actual_file_name)
+        self.assert_exists(f, f.upload_dir)
 
     def test_file_full_name(self):
-        # Write to this dir.
-        self.c['UPLOAD_DIR'] = self.d
-        self.c['UPLOAD_KEEP_FILENAME'] = True
-        self.c['MAX_MEMORY_FILE_SIZE'] = 10
+        f = File(self.file_name,
+                 max_memory_file_size=10,
+                 upload_dir=self.get_temp_dir_bytes(),
+                 upload_keep_filename=True)
 
-        # Write.
-        self.f.write(b'12345678901')
-        self.assertFalse(self.f.in_memory)
+        f.write(b'12345678901')
+        self.assertFalse(f.in_memory)
 
         # Assert that the file exists
-        self.assertEqual(self.f.actual_file_name, b'foo')
-        self.assert_exists()
+        self.assertEqual(f.actual_file_name, b'foo')
+        self.assert_exists(f, f.upload_dir)
 
     def test_file_full_name_with_ext(self):
-        self.c['UPLOAD_DIR'] = self.d
-        self.c['UPLOAD_KEEP_FILENAME'] = True
-        self.c['UPLOAD_KEEP_EXTENSIONS'] = True
-        self.c['MAX_MEMORY_FILE_SIZE'] = 10
+        f = File(self.file_name,
+                 max_memory_file_size=10,
+                 upload_dir=self.get_temp_dir_bytes(),
+                 upload_keep_filename=True,
+                 upload_keep_extensions=True)
 
-        # Write.
-        self.f.write(b'12345678901')
-        self.assertFalse(self.f.in_memory)
+        f.write(b'12345678901')
+        self.assertFalse(f.in_memory)
 
-        # Assert that the file exists
-        self.assertEqual(self.f.actual_file_name, b'foo.txt')
-        self.assert_exists()
+        self.assertEqual(f.actual_file_name, b'foo.txt')
+        self.assert_exists(f, f.upload_dir)
 
     def test_no_dir_with_extension(self):
-        self.c['UPLOAD_KEEP_EXTENSIONS'] = True
-        self.c['MAX_MEMORY_FILE_SIZE'] = 10
-
-        # Write.
-        self.f.write(b'12345678901')
-        self.assertFalse(self.f.in_memory)
+        f = File(self.file_name,
+                 upload_keep_extensions=True,
+                 max_memory_file_size=10)
+        f.write(b'12345678901')
+        self.assertFalse(f.in_memory)
 
         # Assert that the file exists
-        ext = os.path.splitext(self.f.actual_file_name)[1]
+        ext = os.path.splitext(f.actual_file_name)[1]
         self.assertEqual(ext, b'.txt')
-        self.assert_exists()
+        self.assert_exists(f, b"")
 
     def test_invalid_dir_with_name(self):
-        # Write to this dir.
-        self.c['UPLOAD_DIR'] = force_bytes(os.path.join('/', 'tmp', 'notexisting'))
-        self.c['UPLOAD_KEEP_FILENAME'] = True
-        self.c['MAX_MEMORY_FILE_SIZE'] = 5
-
-        # Write.
+        f = File(self.file_name,
+                 upload_dir=force_bytes(os.path.join('/', 'tmp', 'notexisting')),
+                 upload_keep_filename=True,
+                 max_memory_file_size=5)
         with self.assertRaises(FileError):
-            self.f.write(b'1234567890')
+            f.write(b'1234567890')
 
     def test_invalid_dir_no_name(self):
-        # Write to this dir.
-        self.c['UPLOAD_DIR'] = force_bytes(os.path.join('/', 'tmp', 'notexisting'))
-        self.c['UPLOAD_KEEP_FILENAME'] = False
-        self.c['MAX_MEMORY_FILE_SIZE'] = 5
+        f = File(self.file_name,
+                 upload_dir=force_bytes(os.path.join('/', 'tmp', 'notexisting')),
+                 upload_keep_extensions=False,
+                 max_memory_file_size=5)
 
-        # Write.
         with self.assertRaises(FileError):
-            self.f.write(b'1234567890')
+            f.write(b'1234567890')
 
     # TODO: test uploading two files with the same name.
 

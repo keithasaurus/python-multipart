@@ -244,7 +244,7 @@ def str_or_decode_bytes_system(str_or_bytes: Union[str, bytes]) -> str:
         return str_or_bytes
 
 
-class File(object):
+class File:
     """
     This class represents an uploaded file.  It handles writing file data to
     either an in-memory file or a temporary file on-disk, if the optional
@@ -299,20 +299,27 @@ class File(object):
     :param field_name: The field name that uploaded this file.  Note that this
                        can be None, if, for example, the file was uploaded
                        with Content-Type application/octet-stream
-
-    :param config: The configuration for this File.  See above for valid
-                   configuration keys and their corresponding values.
     """
-    def __init__(self, file_name, field_name=None, config=None):
-        # Save configuration, set other variables default.
-        self._config = empty_dict_if_none(config)
+    def __init__(self,
+                 file_name: bytes,
+                 field_name=None,
+                 max_memory_file_size: Optional[int]=MAX_INT,
+                 upload_dir: Optional[bytes]=None,
+                 upload_keep_filename: bool=False,
+                 upload_keep_extensions: bool=False,
+                 upload_delete_tmp: bool=True) -> None:
         self.in_memory = True
         self.size = 0
         self.file_object = BytesIO()
 
         # Save the provided field/file name.
-        self.field_name = field_name
         self.file_name = file_name
+        self.field_name = field_name
+        self.max_memory_file_size = max_memory_file_size
+        self.upload_dir = upload_dir
+        self.upload_keep_filename = upload_keep_filename
+        self.upload_keep_extensions = upload_keep_extensions
+        self.upload_delete_tmp = upload_delete_tmp
 
         # Our actual file name is None by default, since, depending on our
         # config, we may not actually use the provided name.
@@ -360,28 +367,23 @@ class File(object):
 
     def _get_disk_file(self):
         """This function is responsible for getting a file object on-disk for us."""
-        file_dir = self._config.get('UPLOAD_DIR')
-        keep_filename = self._config.get('UPLOAD_KEEP_FILENAME', False)
-        keep_extensions = self._config.get('UPLOAD_KEEP_EXTENSIONS', False)
-        delete_tmp = self._config.get('UPLOAD_DELETE_TMP', True)
-
         # If we have a directory and are to keep the filename...
-        if file_dir is not None and keep_filename:
+        if self.upload_dir is not None and self.upload_keep_filename:
             # Build our filename.
             # TODO: what happens if we don't have a filename?
             fname = (self._file_base + self._ext
-                     if keep_extensions
+                     if self.upload_keep_extensions
                      else self._file_base)
 
-            path = os.path.join(file_dir, fname)
+            path = os.path.join(self.upload_dir, fname)
             try:
                 tmp_file = open(path, 'w+b')
-            except (IOError, OSError) as e:
+            except (IOError, OSError):
                 raise FileError("Error opening temporary file: %r" % path)
         else:
-            tmp_file, fname = get_temp_file_details(file_dir,
-                                                    delete_tmp,
-                                                    keep_extensions,
+            tmp_file, fname = get_temp_file_details(self.upload_dir,
+                                                    self.upload_delete_tmp,
+                                                    self.upload_keep_extensions,
                                                     self)
 
         self.actual_file_name = fname
@@ -411,9 +413,8 @@ class File(object):
 
         # If we're in-memory and are over our limit, we create a file.
         if (self.in_memory and
-                self._config.get('MAX_MEMORY_FILE_SIZE') is not None and
-                (self.size >
-                 self._config.get('MAX_MEMORY_FILE_SIZE'))):
+                self.max_memory_file_size is not None and
+                self.size > self.max_memory_file_size):
             self.flush_to_disk()
 
         # Return the number of bytes written.
@@ -1345,7 +1346,7 @@ def get_octet_stream_parser(
 
     def on_start() -> None:
         nonlocal f
-        f = file_class(file_name, None, config=config)
+        f = file_class(file_name, None, **config_to_file_kwargs(config))
 
     def on_data(data, start, end) -> None:
         nonlocal f
@@ -1407,6 +1408,16 @@ def get_query_string_parser(max_body_size: int,
         on_field_data=on_field_data,
         on_field_end=on_field_end,
         on_end=on_end)
+
+
+def config_to_file_kwargs(config: Dict):
+    """temporary function; just for refactor sanity"""
+    return {k.lower(): v for k, v in config.items()
+            if k.lower() in ["upload_dir",
+                             "upload_keep_filename",
+                             "upload_keep_extensions",
+                             "upload_delete_tmp"
+                             "max_memory_file_size"]}
 
 
 def get_multipart_parser(max_body_size: int,
@@ -1477,7 +1488,7 @@ def get_multipart_parser(max_body_size: int,
         if file_name is None:
             f = field_class(field_name)
         else:
-            f = file_class(file_name, field_name, config=config)
+            f = file_class(file_name, field_name, **config_to_file_kwargs(config))
             is_file = True
 
         # Parse the given Content-Transfer-Encoding to determine what
